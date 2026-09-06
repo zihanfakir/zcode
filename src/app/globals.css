@@ -7,11 +7,17 @@
   --foreground: #ededed;
 }
 
-html, body {
+html {
+  scroll-behavior: smooth;
   background-color: #000000;
   color: #ededed;
+}
+
+body {
+  background-color: #000000;
+  color: #ededed;
+  min-height: 100%;
   overflow-x: hidden;
-  height: 100%;
 }
 
 ::selection {

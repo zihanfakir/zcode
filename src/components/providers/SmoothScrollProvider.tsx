@@ -2,7 +2,6 @@
 
 import { useEffect, type ReactNode } from "react";
 import Lenis from "lenis";
-import { gsap } from "gsap";
 import { prefersReducedMotion } from "@/lib/animations";
 
 export function SmoothScrollProvider({ children }: { children: ReactNode }) {
@@ -10,19 +9,19 @@ export function SmoothScrollProvider({ children }: { children: ReactNode }) {
     if (prefersReducedMotion()) return;
 
     const lenis = new Lenis({
-      duration: 1.1,
+      duration: 1.2,
       easing: (t) => Math.min(1, 1.001 - Math.pow(2, -10 * t)),
-      autoRaf: false,
+      autoRaf: true,
+      smoothWheel: true,
     });
 
-    const updateLenis = (time: number) => {
-      lenis.raf(time * 1000);
-    };
-
-    gsap.ticker.add(updateLenis);
+    // Expose lenis globally for anchor navigation
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (window as any).__lenis = lenis;
 
     return () => {
-      gsap.ticker.remove(updateLenis);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      delete (window as any).__lenis;
       lenis.destroy();
     };
   }, []);

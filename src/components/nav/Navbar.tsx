@@ -8,31 +8,54 @@ import { ScrambleText } from "@/components/motion/ScrambleText";
 export function Navbar() {
   const [mobileOpen, setMobileOpen] = useState(false);
   const pathname = usePathname();
+  const isHome = pathname === "/";
 
-  // Close mobile drawer on route change
   useEffect(() => {
     setMobileOpen(false);
   }, [pathname]);
 
+  const links = {
+    career: isHome ? "#career" : "/about#career",
+    about: isHome ? "#about" : "/about",
+    projects: isHome ? "#projects" : "/projects",
+    achievements: isHome ? "#achievements" : "/achievements",
+  };
+
+  const handleAnchorClick = (e: React.MouseEvent<HTMLAnchorElement>, targetId: string) => {
+    if (isHome) {
+      const el = document.querySelector(targetId);
+      if (el) {
+        e.preventDefault();
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const lenis = (window as any).__lenis;
+        if (lenis) {
+          lenis.scrollTo(el);
+        } else {
+          el.scrollIntoView({ behavior: "smooth" });
+        }
+      }
+    }
+  };
+
   return (
     <>
-      <header className="fixed inset-x-0 top-0 z-50 flex items-center justify-between px-6 pb-5 pt-[calc(1.25rem+env(safe-area-inset-top))] sm:px-10">
+      <header className="fixed inset-x-0 top-0 z-50 flex items-center justify-between px-6 pb-5 pt-[calc(1.25rem+env(safe-area-inset-top))] sm:px-10 bg-black/40 backdrop-blur-md border-b border-zinc-900/40">
         {/* Left nav links */}
         <nav className="hidden items-center gap-6 sm:flex sm:gap-8">
-          <Link
-            href="/about#career"
+          <a
+            href={links.career}
+            onClick={(e) => handleAnchorClick(e, "#career")}
             className="text-xs font-medium uppercase tracking-[0.18em] text-zinc-400 hover:text-white transition-colors duration-200"
           >
             <ScrambleText entrance="observer">Career</ScrambleText>
-          </Link>
-          <Link
-            href="/about"
-            className={`text-xs font-medium uppercase tracking-[0.18em] transition-colors duration-200 ${
-              pathname === "/about" ? "text-white font-semibold" : "text-zinc-400 hover:text-white"
-            }`}
+          </a>
+          <a
+            href={links.about}
+            onClick={(e) => handleAnchorClick(e, "#about")}
+            className="text-xs font-medium uppercase tracking-[0.18em] text-zinc-400 hover:text-white transition-colors duration-200"
           >
             <ScrambleText entrance="observer">About</ScrambleText>
-          </Link>
+          </a>
         </nav>
 
         {/* Center monogram logo: ZF */}
@@ -51,7 +74,6 @@ export function Navbar() {
               strokeLinecap="round"
               strokeLinejoin="round"
             >
-              {/* Monogram Z and F fused geometric lines */}
               <path d="M11 14h18l-14 12h14" />
               <path d="M19 14v12" opacity="0.4" />
               <circle cx="20" cy="20" r="16" stroke="currentColor" strokeWidth="1" strokeDasharray="3 3" opacity="0.3" />
@@ -62,22 +84,20 @@ export function Navbar() {
 
         {/* Right nav links */}
         <nav className="hidden items-center gap-6 sm:flex sm:gap-8">
-          <Link
-            href="/projects"
-            className={`text-xs font-medium uppercase tracking-[0.18em] transition-colors duration-200 ${
-              pathname === "/projects" ? "text-white font-semibold" : "text-zinc-400 hover:text-white"
-            }`}
+          <a
+            href={links.projects}
+            onClick={(e) => handleAnchorClick(e, "#projects")}
+            className="text-xs font-medium uppercase tracking-[0.18em] text-zinc-400 hover:text-white transition-colors duration-200"
           >
             <ScrambleText entrance="observer">Projects</ScrambleText>
-          </Link>
-          <Link
-            href="/achievements"
-            className={`text-xs font-medium uppercase tracking-[0.18em] transition-colors duration-200 ${
-              pathname === "/achievements" ? "text-white font-semibold" : "text-zinc-400 hover:text-white"
-            }`}
+          </a>
+          <a
+            href={links.achievements}
+            onClick={(e) => handleAnchorClick(e, "#achievements")}
+            className="text-xs font-medium uppercase tracking-[0.18em] text-zinc-400 hover:text-white transition-colors duration-200"
           >
             <ScrambleText entrance="observer">Achievements</ScrambleText>
-          </Link>
+          </a>
         </nav>
 
         {/* Mobile menu button */}
@@ -117,34 +137,46 @@ export function Navbar() {
         >
           Home
         </Link>
-        <Link
-          href="/about"
-          onClick={() => setMobileOpen(false)}
+        <a
+          href={links.about}
+          onClick={(e) => {
+            setMobileOpen(false);
+            handleAnchorClick(e, "#about");
+          }}
           className="text-2xl font-semibold uppercase tracking-[0.2em] text-zinc-300 transition-colors hover:text-white"
         >
           About
-        </Link>
-        <Link
-          href="/about#career"
-          onClick={() => setMobileOpen(false)}
+        </a>
+        <a
+          href={links.career}
+          onClick={(e) => {
+            setMobileOpen(false);
+            handleAnchorClick(e, "#career");
+          }}
           className="text-2xl font-semibold uppercase tracking-[0.2em] text-zinc-300 transition-colors hover:text-white"
         >
           Career
-        </Link>
-        <Link
-          href="/projects"
-          onClick={() => setMobileOpen(false)}
+        </a>
+        <a
+          href={links.projects}
+          onClick={(e) => {
+            setMobileOpen(false);
+            handleAnchorClick(e, "#projects");
+          }}
           className="text-2xl font-semibold uppercase tracking-[0.2em] text-zinc-300 transition-colors hover:text-white"
         >
           Projects
-        </Link>
-        <Link
-          href="/achievements"
-          onClick={() => setMobileOpen(false)}
+        </a>
+        <a
+          href={links.achievements}
+          onClick={(e) => {
+            setMobileOpen(false);
+            handleAnchorClick(e, "#achievements");
+          }}
           className="text-2xl font-semibold uppercase tracking-[0.2em] text-zinc-300 transition-colors hover:text-white"
         >
           Achievements
-        </Link>
+        </a>
       </div>
     </>
   );
