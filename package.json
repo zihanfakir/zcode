@@ -1,0 +1,16 @@
+{
+  "name": "z-code-workspace",
+  "version": "1.0.0",
+  "description": "Z-Code: Next-Generation Circular 2D Barcode Ecosystem",
+  "scripts": {
+    "test": "npm --prefix core test",
+    "build:core": "npm --prefix core run build",
+    "build:web": "npm --prefix web run build",
+    "build": "npm run build:core && npm run build:web",
+    "dev": "npm --prefix web run dev",
+    "start": "npm --prefix web run preview"
+  },
+  "keywords": ["z-code", "circular-barcode", "2d-barcode", "reed-solomon"],
+  "author": "Zihan Fakir",
+  "license": "MIT"
+}

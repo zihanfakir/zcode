@@ -1,0 +1,7 @@
+<resources>
+    <string name="app_name">Z-Code</string>
+    <string name="title_generator">Generator</string>
+    <string name="title_scanner">Scanner</string>
+    <string name="title_history">History</string>
+    <string name="title_settings">Settings</string>
+</resources>
