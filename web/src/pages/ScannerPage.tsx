@@ -169,7 +169,7 @@ export const ScannerPage: React.FC = () => {
     setCameraActive(false);
   }, []);
 
-  // Camera Scanning Loop
+  // Camera Scanning Loop with robust device fallbacks (iOS Safari, Android Chrome, WebView)
   const startCamera = useCallback(async () => {
     setCameraError(null);
     stopCamera();
@@ -179,38 +179,61 @@ export const ScannerPage: React.FC = () => {
       return;
     }
 
+    let stream: MediaStream | null = null;
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({
+      // 1. Try ideal rear camera
+      stream = await navigator.mediaDevices.getUserMedia({
         video: {
-          facingMode: facingMode,
+          facingMode: { ideal: facingMode },
           width: { ideal: 1280 },
           height: { ideal: 720 },
         },
       });
-
-      if (!isMountedRef.current) {
-        stream.getTracks().forEach((t) => t.stop());
-        return;
-      }
-
-      streamRef.current = stream;
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        await videoRef.current.play();
-        if (isMountedRef.current) {
-          setCameraActive(true);
+    } catch {
+      try {
+        // 2. Fallback without resolution constraint
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: { ideal: facingMode } },
+        });
+      } catch {
+        try {
+          // 3. Fallback to any available camera
+          stream = await navigator.mediaDevices.getUserMedia({ video: true });
+        } catch (err: any) {
+          if (!isMountedRef.current) return;
+          if (err.name === "NotAllowedError" || err.name === "PermissionDeniedError") {
+            setCameraError("Camera permission was denied. Please allow camera permissions in your browser or device settings.");
+          } else if (err.name === "NotFoundError" || err.name === "DevicesNotFoundError") {
+            setCameraError("No camera device found on this device.");
+          } else {
+            setCameraError(`Camera error: ${err.message || err.name || "Access failed"}. Please check permissions.`);
+          }
+          setCameraActive(false);
+          return;
         }
       }
-    } catch (err: any) {
-      if (!isMountedRef.current) return;
-      if (err.name === "NotAllowedError" || err.name === "PermissionDeniedError") {
-        setCameraError("Camera permission was denied. Please allow camera permissions in browser settings.");
-      } else if (err.name === "NotFoundError" || err.name === "DevicesNotFoundError") {
-        setCameraError("No camera device found on this computer.");
-      } else {
-        setCameraError("Could not access camera. Please check permissions or upload an image file.");
+    }
+
+    if (!isMountedRef.current || !stream) {
+      stream?.getTracks().forEach((t) => t.stop());
+      return;
+    }
+
+    streamRef.current = stream;
+    if (videoRef.current) {
+      const video = videoRef.current;
+      video.srcObject = stream;
+      video.setAttribute("playsinline", "true");
+      video.setAttribute("autoplay", "true");
+      video.setAttribute("muted", "true");
+      try {
+        await video.play();
+      } catch {
+        // Autoplay handled
       }
-      setCameraActive(false);
+      if (isMountedRef.current) {
+        setCameraActive(true);
+      }
     }
   }, [facingMode, stopCamera]);
 
@@ -447,15 +470,16 @@ export const ScannerPage: React.FC = () => {
               <div className="space-y-4">
                 {/* Camera Viewport */}
                 <div className="relative aspect-square w-full max-w-md mx-auto rounded-3xl overflow-hidden bg-black border border-theme-border shadow-2xl flex items-center justify-center">
-                  {cameraActive ? (
-                    <video
-                      ref={videoRef}
-                      playsInline
-                      muted
-                      className="w-full h-full object-cover"
-                    />
-                  ) : cameraError ? (
-                    <div className="p-6 text-center space-y-3">
+                  <video
+                    ref={videoRef}
+                    autoPlay
+                    playsInline
+                    muted
+                    className={`w-full h-full object-cover ${cameraActive ? "block" : "hidden"}`}
+                  />
+
+                  {!cameraActive && cameraError && (
+                    <div className="p-6 text-center space-y-3 z-10">
                       <AlertCircle className="w-10 h-10 text-amber-400 mx-auto" />
                       <p className="text-xs text-theme-muted font-medium">{cameraError}</p>
                       <button
@@ -465,8 +489,10 @@ export const ScannerPage: React.FC = () => {
                         Try Again
                       </button>
                     </div>
-                  ) : (
-                    <div className="text-xs text-theme-muted flex items-center gap-2">
+                  )}
+
+                  {!cameraActive && !cameraError && (
+                    <div className="text-xs text-theme-muted flex items-center gap-2 z-10">
                       <RefreshCw className="w-4 h-4 animate-spin text-theme-primary" />
                       Initializing camera stream...
                     </div>

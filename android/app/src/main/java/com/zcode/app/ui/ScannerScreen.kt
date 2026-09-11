@@ -1,8 +1,10 @@
 package com.zcode.app.ui
 
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
 import android.widget.Toast
+import androidx.compose.ui.text.style.TextAlign
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.camera.core.CameraSelector
@@ -48,7 +50,14 @@ fun ScannerScreen() {
     val clipboardManager = LocalClipboardManager.current
 
     var decodedResult by remember { mutableStateOf<ZCodeDecodedResult?>(null) }
-    var hasCameraPermission by remember { mutableStateOf(false) }
+    var hasCameraPermission by remember {
+        mutableStateOf(
+            ContextCompat.checkSelfPermission(
+                context,
+                android.Manifest.permission.CAMERA
+            ) == PackageManager.PERMISSION_GRANTED
+        )
+    }
     var showSafeLinkDialog by remember { mutableStateOf(false) }
 
     val decoder = remember { ZCodeDecoder() }
@@ -60,7 +69,9 @@ fun ScannerScreen() {
     }
 
     LaunchedEffect(Unit) {
-        permissionLauncher.launch(android.Manifest.permission.CAMERA)
+        if (!hasCameraPermission) {
+            permissionLauncher.launch(android.Manifest.permission.CAMERA)
+        }
     }
 
     // Image Picker fallback
@@ -160,7 +171,14 @@ fun ScannerScreen() {
                                 }
                             }
 
-                            val cameraSelector = CameraSelector.DEFAULT_BACK_CAMERA
+                            val cameraSelector = if (cameraProvider.hasCamera(CameraSelector.DEFAULT_BACK_CAMERA)) {
+                                CameraSelector.DEFAULT_BACK_CAMERA
+                            } else if (cameraProvider.hasCamera(CameraSelector.DEFAULT_FRONT_CAMERA)) {
+                                CameraSelector.DEFAULT_FRONT_CAMERA
+                            } else {
+                                CameraSelector.DEFAULT_BACK_CAMERA
+                            }
+
                             try {
                                 cameraProvider.unbindAll()
                                 cameraProvider.bindToLifecycle(
@@ -169,19 +187,36 @@ fun ScannerScreen() {
                                     preview,
                                     imageAnalysis
                                 )
-                            } catch (_: Exception) {}
+                            } catch (e: Exception) {
+                                e.printStackTrace()
+                            }
                         }, ContextCompat.getMainExecutor(ctx))
                         previewView
                     },
                     modifier = Modifier.fillMaxSize()
                 )
             } else {
-                Text(
-                    text = "Camera Permission Required",
-                    color = ZTextMuted,
-                    fontSize = 12.sp,
-                    fontFamily = FontFamily.Monospace
-                )
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center,
+                    modifier = Modifier.padding(16.dp)
+                ) {
+                    Text(
+                        text = "Camera Permission Required",
+                        color = ZTextMuted,
+                        fontSize = 12.sp,
+                        fontFamily = FontFamily.Monospace,
+                        textAlign = TextAlign.Center
+                    )
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Button(
+                        onClick = { permissionLauncher.launch(android.Manifest.permission.CAMERA) },
+                        shape = RoundedCornerShape(8.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = ZCyan, contentColor = ZDarkBg)
+                    ) {
+                        Text("Grant Permission", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
             }
 
             // Reticle center dot
