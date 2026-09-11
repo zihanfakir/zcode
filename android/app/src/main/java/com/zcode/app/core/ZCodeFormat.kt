@@ -14,20 +14,56 @@ enum class ZCodeDataType(val code: Int) {
 data class ZCodePayload(
     val type: ZCodeDataType,
     val content: String,
-    val version: Int
-)
+    val version: Int,
+    val isLocked: Boolean = false,
+    val flags: Int = 0,
+    val encryptedData: ByteArray? = null
+) {
+    override fun equals(other: Any?): Boolean {
+        if (this === other) return true
+        if (javaClass != other?.javaClass) return false
+
+        other as ZCodePayload
+
+        if (type != other.type) return false
+        if (content != other.content) return false
+        if (version != other.version) return false
+        if (isLocked != other.isLocked) return false
+        if (flags != other.flags) return false
+        if (encryptedData != null) {
+            if (other.encryptedData == null) return false
+            if (!encryptedData.contentEquals(other.encryptedData)) return false
+        } else if (other.encryptedData != null) return false
+
+        return true
+    }
+
+    override fun hashCode(): Int {
+        var result = type.hashCode()
+        result = 31 * result + content.hashCode()
+        result = 31 * result + version
+        result = 31 * result + isLocked.hashCode()
+        result = 31 * result + flags
+        result = 31 * result + (encryptedData?.contentHashCode() ?: 0)
+        return result
+    }
+}
 
 object ZCodeFormat {
     const val MAGIC_0 = 0x5A
     const val MAGIC_1 = 0x43
     const val VERSION_1 = 0x01
 
-    const val MAX_PAYLOAD = 31
-    const val TOTAL_DATA_BYTES = 39
-    const val TOTAL_CODEWORD_BYTES = 49
+    const val FLAG_ENCRYPTED = 0x80
+    const val FLAG_COMPRESSED = 0x40
+
     const val HEADER_BYTES = 6
     const val CRC_BYTES = 2
-    const val ECC_BYTES = 10
+    const val ECC_BYTES = 14
+    const val MAX_PAYLOAD = 63
+    const val TOTAL_DATA_BYTES = HEADER_BYTES + MAX_PAYLOAD + CRC_BYTES // 71 bytes
+    const val TOTAL_CODEWORD_BYTES = TOTAL_DATA_BYTES + ECC_BYTES // 85 bytes
+    const val MAX_ENCRYPTED_PAYLOAD = 27 // 63 - 36 crypto overhead
 
     val URL_PREFIXES = arrayOf(
         "",
@@ -43,22 +79,7 @@ object ZCodeFormat {
         return regex.containsMatchIn(trimmed)
     }
 
-    fun pack(type: ZCodeDataType, rawContent: String): ByteArray {
-        var content = rawContent.trim()
-        var flags = 0
-
-        if (type === ZCodeDataType.URL) {
-            for (i in 1 until URL_PREFIXES.size) {
-                val prefix = URL_PREFIXES[i]
-                if (content.startsWith(prefix, ignoreCase = true)) {
-                    flags = i
-                    content = content.substring(prefix.length)
-                    break
-                }
-            }
-        }
-
-        val payloadBytes = content.toByteArray(StandardCharsets.UTF_8)
+    fun packRaw(type: ZCodeDataType, flags: Int, payloadBytes: ByteArray): ByteArray {
         if (payloadBytes.size > MAX_PAYLOAD) {
             throw IllegalArgumentException("Payload exceeds limit of $MAX_PAYLOAD bytes")
         }
@@ -80,6 +101,26 @@ object ZCodeFormat {
         return block
     }
 
+    fun pack(type: ZCodeDataType, rawContent: String): ByteArray {
+        var content = if (type == ZCodeDataType.URL) rawContent.trim() else rawContent
+        var flags = 0
+
+        if (type == ZCodeDataType.URL) {
+            val prefixOrder = intArrayOf(5, 3, 4, 1, 2)
+            for (idx in prefixOrder) {
+                val prefix = URL_PREFIXES[idx]
+                if (content.startsWith(prefix, ignoreCase = true)) {
+                    flags = idx
+                    content = content.substring(prefix.length)
+                    break
+                }
+            }
+        }
+
+        val payloadBytes = content.toByteArray(StandardCharsets.UTF_8)
+        return packRaw(type, flags, payloadBytes)
+    }
+
     fun unpack(dataBlock: ByteArray): ZCodePayload {
         if (dataBlock.size < HEADER_BYTES + CRC_BYTES) {
             throw IllegalArgumentException("Data block too short")
@@ -89,12 +130,29 @@ object ZCodeFormat {
         }
 
         val version = dataBlock[2].toInt() and 0xFF
+        if (version != VERSION_1) {
+            throw IllegalArgumentException("Unsupported Z-Code version: $version")
+        }
         val typeCode = dataBlock[3].toInt() and 0xFF
         val type = ZCodeDataType.fromCode(typeCode) ?: throw IllegalArgumentException("Unknown type: $typeCode")
         val flags = dataBlock[4].toInt() and 0xFF
         val payloadLen = dataBlock[5].toInt() and 0xFF
 
         if (payloadLen > MAX_PAYLOAD) throw IllegalArgumentException("Invalid payload length")
+
+        val isLocked = (flags and FLAG_ENCRYPTED) != 0
+
+        if (isLocked) {
+            val encryptedBytes = dataBlock.copyOfRange(HEADER_BYTES, HEADER_BYTES + payloadLen)
+            return ZCodePayload(
+                type = type,
+                content = "",
+                version = version,
+                isLocked = true,
+                flags = flags,
+                encryptedData = encryptedBytes
+            )
+        }
 
         var content = String(dataBlock, HEADER_BYTES, payloadLen, StandardCharsets.UTF_8)
 
@@ -105,6 +163,12 @@ object ZCodeFormat {
             }
         }
 
-        return ZCodePayload(type, content, version)
+        return ZCodePayload(
+            type = type,
+            content = content,
+            version = version,
+            isLocked = false,
+            flags = flags
+        )
     }
 }

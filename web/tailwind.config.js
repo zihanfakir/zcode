@@ -8,6 +8,15 @@ export default {
   theme: {
     extend: {
       colors: {
+        theme: {
+          bg: "var(--bg-main)",
+          panel: "var(--bg-panel)",
+          card: "var(--bg-card)",
+          border: "var(--border-main)",
+          text: "var(--text-main)",
+          muted: "var(--text-muted)",
+          primary: "var(--primary-accent)",
+        },
         zcode: {
           cyan: "#00f0ff",
           dark: "#0a0e17",

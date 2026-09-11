@@ -101,4 +101,31 @@ class ZCodeDecoder {
 
         return ZCodeDecodedResult(payload, rotation, errorsCorrected, location)
     }
+
+    companion object {
+        fun unlock(payload: ZCodePayload, password: String): ZCodePayload {
+            if (!payload.isLocked) return payload
+            val encryptedData = payload.encryptedData
+                ?: throw IllegalArgumentException("Cannot unlock Z-Code: missing encrypted payload data")
+
+            val envelope = ZCodeCrypto.unpackEnvelope(encryptedData)
+            val decryptedBytes = ZCodeCrypto.decrypt(password, envelope)
+            var content = String(decryptedBytes, java.nio.charset.StandardCharsets.UTF_8)
+
+            if (payload.type == ZCodeDataType.URL) {
+                val prefixIndex = payload.flags and 0x0F
+                if (prefixIndex in 1 until ZCodeFormat.URL_PREFIXES.size) {
+                    content = ZCodeFormat.URL_PREFIXES[prefixIndex] + content
+                }
+            }
+
+            return ZCodePayload(
+                type = payload.type,
+                content = content,
+                version = payload.version,
+                isLocked = false,
+                flags = payload.flags
+            )
+        }
+    }
 }

@@ -86,9 +86,9 @@ fun SettingsScreen() {
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 Text("ABOUT Z-CODE", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = ZTextMuted)
-                Text("Version 1.0.0 (RFC-ZCODE-01)", color = ZText, fontSize = 13.sp)
-                Text("Engine: Reed-Solomon RS(49, 39) over GF(256)", color = ZCyan, fontSize = 11.sp)
-                Text("Concentric Polar Layout with 7 Data Tracks", color = ZTextMuted, fontSize = 11.sp)
+                Text("Engine: Reed-Solomon RS(85, 71) over GF(256)", color = ZCyan, fontSize = 11.sp)
+                Text("Concentric Polar Layout with 10 Data Tracks (680 bits)", color = ZTextMuted, fontSize = 11.sp)
+                Text("Security: AES-256-GCM + PBKDF2 Client-Side Encryption", color = ZAmber, fontSize = 11.sp)
             }
         }
     }

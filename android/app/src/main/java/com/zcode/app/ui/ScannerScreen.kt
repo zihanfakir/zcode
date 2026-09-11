@@ -125,20 +125,38 @@ fun ScannerScreen() {
 
                             val cameraExecutor = Executors.newSingleThreadExecutor()
                             imageAnalysis.setAnalyzer(cameraExecutor) { imageProxy ->
-                                val buffer = imageProxy.planes[0].buffer
-                                val bytes = ByteArray(buffer.remaining())
-                                buffer.get(bytes)
-
-                                try {
-                                    val res = decoder.decodeGrayscale(bytes, imageProxy.width, imageProxy.height)
-                                    decodedResult = res
-                                    if (res.payload.type == ZCodeDataType.URL) {
-                                        showSafeLinkDialog = true
+                                imageProxy.use { proxy ->
+                                    if (decodedResult != null && (decodedResult!!.payload.isLocked || showSafeLinkDialog)) {
+                                        return@use
                                     }
-                                } catch (_: Exception) {
-                                    // Scan in progress
-                                } finally {
-                                    imageProxy.close()
+
+                                    try {
+                                        val plane = proxy.planes[0]
+                                        val buffer = plane.buffer
+                                        val width = proxy.width
+                                        val height = proxy.height
+                                        val rowStride = plane.rowStride
+                                        val gray = ByteArray(width * height)
+
+                                        if (rowStride == width) {
+                                            buffer.get(gray)
+                                        } else {
+                                            for (row in 0 until height) {
+                                                buffer.position(row * rowStride)
+                                                buffer.get(gray, row * width, width)
+                                            }
+                                        }
+
+                                        val res = decoder.decodeGrayscale(gray, width, height)
+                                        if (res != null) {
+                                            decodedResult = res
+                                            if (res.payload.type == ZCodeDataType.URL && !res.payload.isLocked) {
+                                                showSafeLinkDialog = true
+                                            }
+                                        }
+                                    } catch (_: Exception) {
+                                        // Scan in progress or invalid frame
+                                    }
                                 }
                             }
 
@@ -189,6 +207,9 @@ fun ScannerScreen() {
 
         // Result Card
         if (decodedResult != null) {
+            val result = decodedResult!!
+            var unlockPassword by remember(result) { mutableStateOf("") }
+
             Card(
                 shape = RoundedCornerShape(16.dp),
                 colors = CardDefaults.cardColors(containerColor = ZPanelBg),
@@ -204,54 +225,119 @@ fun ScannerScreen() {
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            text = if (decodedResult!!.payload.type == ZCodeDataType.URL) "URL LINK" else "PLAIN TEXT",
-                            color = ZCyan,
+                            text = when {
+                                result.payload.isLocked -> "🔒 PROTECTED Z-CODE"
+                                result.payload.type == ZCodeDataType.URL -> "URL LINK"
+                                else -> "PLAIN TEXT"
+                            },
+                            color = when {
+                                result.payload.isLocked -> ZAmber
+                                else -> ZCyan
+                            },
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Bold
                         )
                         Text(
-                            text = "CRC-16 Verified",
+                            text = "RS(85, 71) Verified",
                             color = ZEmerald,
                             fontSize = 10.sp,
                             fontWeight = FontWeight.Bold
                         )
                     }
 
-                    Text(
-                        text = decodedResult!!.payload.content,
-                        color = ZText,
-                        fontSize = 14.sp,
-                        fontFamily = FontFamily.Monospace
-                    )
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Button(
-                            onClick = {
-                                clipboardManager.setText(AnnotatedString(decodedResult!!.payload.content))
-                                Toast.makeText(context, "Copied to clipboard", Toast.LENGTH_SHORT).show()
-                            },
-                            shape = RoundedCornerShape(8.dp),
-                            colors = ButtonDefaults.buttonColors(containerColor = ZBorder, contentColor = ZText),
-                            modifier = Modifier.weight(1f)
+                    if (result.payload.isLocked) {
+                        // Locked Code view
+                        Column(
+                            verticalArrangement = Arrangement.spacedBy(10.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .background(ZAmber.copy(alpha = 0.08f), RoundedCornerShape(12.dp))
+                                .padding(12.dp)
                         ) {
-                            Icon(Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(14.dp))
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text("Copy", fontSize = 12.sp)
-                        }
-
-                        if (decodedResult!!.payload.type == ZCodeDataType.URL) {
+                            Text(
+                                text = "🔒 This Z-Code is password protected.",
+                                color = ZText,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                text = "Encrypted with AES-256-GCM. Enter password to view contents:",
+                                color = ZTextMuted,
+                                fontSize = 11.sp
+                            )
+                            OutlinedTextField(
+                                value = unlockPassword,
+                                onValueChange = { unlockPassword = it },
+                                modifier = Modifier.fillMaxWidth(),
+                                placeholder = { Text("Enter password...") },
+                                singleLine = true,
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    focusedTextColor = ZText,
+                                    unfocusedTextColor = ZText,
+                                    focusedBorderColor = ZAmber,
+                                    unfocusedBorderColor = ZBorder
+                                )
+                            )
                             Button(
-                                onClick = { showSafeLinkDialog = true },
+                                onClick = {
+                                    if (unlockPassword.isNotBlank()) {
+                                        try {
+                                            val unlocked = ZCodeDecoder.unlock(result.payload, unlockPassword)
+                                            decodedResult = result.copy(payload = unlocked)
+                                            if (unlocked.type == ZCodeDataType.URL) {
+                                                showSafeLinkDialog = true
+                                            }
+                                        } catch (e: Exception) {
+                                            Toast.makeText(context, "Incorrect password. Decryption failed.", Toast.LENGTH_SHORT).show()
+                                        }
+                                    }
+                                },
                                 shape = RoundedCornerShape(8.dp),
-                                colors = ButtonDefaults.buttonColors(containerColor = ZCyan, contentColor = ZDarkBg),
+                                colors = ButtonDefaults.buttonColors(containerColor = ZAmber, contentColor = ZDarkBg),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text("Unlock Z-Code", fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    } else {
+                        // Unlocked content view
+                        Text(
+                            text = result.payload.content,
+                            color = ZText,
+                            fontSize = 14.sp,
+                            fontFamily = FontFamily.Monospace
+                        )
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Button(
+                                onClick = {
+                                    clipboardManager.setText(AnnotatedString(result.payload.content))
+                                    Toast.makeText(context, "Copied to clipboard", Toast.LENGTH_SHORT).show()
+                                },
+                                shape = RoundedCornerShape(8.dp),
+                                colors = ButtonDefaults.buttonColors(containerColor = ZBorder, contentColor = ZText),
                                 modifier = Modifier.weight(1f)
                             ) {
-                                Icon(Icons.Default.OpenInBrowser, contentDescription = null, modifier = Modifier.size(14.dp))
+                                Icon(Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(14.dp))
                                 Spacer(modifier = Modifier.width(6.dp))
-                                Text("Open Link", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                Text("Copy", fontSize = 12.sp)
+                            }
+
+                            if (result.payload.type == ZCodeDataType.URL) {
+                                Button(
+                                    onClick = { showSafeLinkDialog = true },
+                                    shape = RoundedCornerShape(8.dp),
+                                    colors = ButtonDefaults.buttonColors(containerColor = ZCyan, contentColor = ZDarkBg),
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Icon(Icons.Default.OpenInBrowser, contentDescription = null, modifier = Modifier.size(14.dp))
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text("Open Link", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                }
                             }
                         }
                     }
@@ -277,8 +363,10 @@ fun ScannerScreen() {
                     onClick = {
                         showSafeLinkDialog = false
                         val safeUrl = if (url.startsWith("http")) url else "https://$url"
-                        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(safeUrl))
-                        context.startActivity(intent)
+                        try {
+                            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(safeUrl))
+                            context.startActivity(intent)
+                        } catch (_: Exception) {}
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = ZCyan, contentColor = ZDarkBg)
                 ) {

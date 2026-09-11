@@ -17,16 +17,34 @@ export const SafeLinkModal: React.FC<SafeLinkModalProps> = ({ url, isOpen, onClo
   let path = "";
   let isHttps = false;
   let isIpAddress = false;
+  let isValidWebUrl = false;
+  let isBlockedScheme = false;
+
+  const trimmed = url.trim();
+  const hasScheme = /^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(trimmed);
 
   try {
-    const parsed = new URL(url.startsWith("http") ? url : `https://${url}`);
-    hostname = parsed.hostname;
-    protocol = parsed.protocol;
-    path = parsed.pathname + parsed.search + parsed.hash;
-    isHttps = protocol === "https:";
-    isIpAddress = /^(\d{1,3}\.){3}\d{1,3}$/.test(hostname);
+    const parsed = new URL(hasScheme ? trimmed : `https://${trimmed}`);
+    protocol = parsed.protocol.toLowerCase();
+    if (protocol === "https:" || protocol === "http:") {
+      isValidWebUrl = true;
+      isHttps = protocol === "https:";
+      hostname = parsed.hostname;
+      path = parsed.pathname + parsed.search + parsed.hash;
+      isIpAddress =
+        /^(\d{1,3}\.){3}\d{1,3}$/.test(hostname) ||
+        hostname === "localhost" ||
+        hostname === "127.0.0.1" ||
+        hostname.endsWith(".local");
+    } else {
+      isBlockedScheme = true;
+      protocol = parsed.protocol;
+      hostname = parsed.hostname || "Unsupported scheme";
+      path = parsed.pathname;
+    }
   } catch {
-    hostname = url;
+    isValidWebUrl = false;
+    hostname = trimmed;
     protocol = "unknown";
   }
 
@@ -37,28 +55,29 @@ export const SafeLinkModal: React.FC<SafeLinkModalProps> = ({ url, isOpen, onClo
   };
 
   const handleOpen = () => {
-    const safeUrl = url.startsWith("http://") || url.startsWith("https://") ? url : `https://${url}`;
+    if (!isValidWebUrl || isBlockedScheme) return;
+    const safeUrl = hasScheme ? trimmed : `https://${trimmed}`;
     window.open(safeUrl, "_blank", "noopener,noreferrer");
     onClose();
   };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
-      <div className="bg-[#0f172a] border border-slate-700 w-full max-w-lg rounded-2xl shadow-2xl overflow-hidden">
+      <div className="bg-theme-panel border border-theme-border w-full max-w-lg rounded-2xl shadow-2xl overflow-hidden">
         {/* Header */}
-        <div className="px-6 py-4 border-b border-slate-800 flex items-center justify-between bg-slate-900/50">
+        <div className="px-6 py-4 border-b border-theme-border flex items-center justify-between bg-theme-card/50">
           <div className="flex items-center space-x-2.5">
             <div className="p-2 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-400">
               <ShieldAlert className="w-5 h-5" />
             </div>
             <div>
-              <h3 className="text-base font-bold text-white">Untrusted Link Verification</h3>
-              <p className="text-xs text-slate-400">Review link destination before proceeding</p>
+              <h3 className="text-base font-bold text-theme-text">Untrusted Link Verification</h3>
+              <p className="text-xs text-theme-muted">Review link destination before proceeding</p>
             </div>
           </div>
           <button
             onClick={onClose}
-            className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800 transition-colors"
+            className="text-theme-muted hover:text-theme-text p-1 rounded-lg hover:bg-theme-card transition-colors"
           >
             <X className="w-5 h-5" />
           </button>
@@ -67,11 +86,11 @@ export const SafeLinkModal: React.FC<SafeLinkModalProps> = ({ url, isOpen, onClo
         {/* Content */}
         <div className="p-6 space-y-5">
           {/* Security alert banner */}
-          <div className="p-3.5 rounded-xl bg-slate-800/60 border border-slate-700/80 text-xs text-slate-300 flex items-start gap-3">
+          <div className="p-3.5 rounded-xl bg-theme-card border border-theme-border text-xs text-theme-text flex items-start gap-3">
             <AlertTriangle className="w-4 h-4 text-amber-400 flex-shrink-0 mt-0.5" />
             <div>
-              <p className="font-semibold text-slate-200">Safety Notice:</p>
-              <p className="mt-0.5 text-slate-400">
+              <p className="font-semibold text-theme-text">Safety Notice:</p>
+              <p className="mt-0.5 text-theme-muted">
                 Z-Code never automatically opens links. Make sure you recognize the destination domain
                 before clicking continue.
               </p>
@@ -80,13 +99,13 @@ export const SafeLinkModal: React.FC<SafeLinkModalProps> = ({ url, isOpen, onClo
 
           {/* Domain Breakdown */}
           <div className="space-y-3">
-            <div className="p-3 rounded-xl bg-slate-950 border border-slate-800 space-y-2">
+            <div className="p-3 rounded-xl bg-theme-bg border border-theme-border space-y-2">
               <div className="flex items-center justify-between text-xs">
-                <span className="text-slate-400 flex items-center gap-1.5 font-mono">
-                  <Globe className="w-3.5 h-3.5 text-cyan-400" />
+                <span className="text-theme-muted flex items-center gap-1.5 font-mono">
+                  <Globe className="w-3.5 h-3.5 text-theme-primary" />
                   Destination Domain
                 </span>
-                <span className="flex items-center gap-1 text-[11px] font-mono px-2 py-0.5 rounded bg-slate-800 text-slate-300">
+                <span className="flex items-center gap-1 text-[11px] font-mono px-2 py-0.5 rounded bg-theme-card border border-theme-border text-theme-text">
                   {isHttps ? (
                     <>
                       <Lock className="w-3 h-3 text-emerald-400" /> HTTPS Secure
@@ -96,12 +115,12 @@ export const SafeLinkModal: React.FC<SafeLinkModalProps> = ({ url, isOpen, onClo
                   )}
                 </span>
               </div>
-              <div className="font-mono text-base font-bold text-cyan-300 break-all">
+              <div className="font-mono text-base font-bold text-theme-primary break-all">
                 {hostname || "Unknown Host"}
               </div>
               {path && path !== "/" && (
-                <div className="text-xs font-mono text-slate-400 break-all">
-                  Path: <span className="text-slate-300">{path}</span>
+                <div className="text-xs font-mono text-theme-muted break-all">
+                  Path: <span className="text-theme-text">{path}</span>
                 </div>
               )}
             </div>
@@ -115,10 +134,10 @@ export const SafeLinkModal: React.FC<SafeLinkModalProps> = ({ url, isOpen, onClo
 
             {/* Complete Raw URL */}
             <div>
-              <label className="text-xs font-medium text-slate-400 block mb-1.5">
+              <label className="text-xs font-medium text-theme-muted block mb-1.5">
                 Full Scanned URL:
               </label>
-              <div className="p-3 rounded-xl bg-slate-900 border border-slate-800 font-mono text-xs text-slate-200 break-all select-all">
+              <div className="p-3 rounded-xl bg-theme-card border border-theme-border font-mono text-xs text-theme-text break-all select-all">
                 {url}
               </div>
             </div>
@@ -126,10 +145,10 @@ export const SafeLinkModal: React.FC<SafeLinkModalProps> = ({ url, isOpen, onClo
         </div>
 
         {/* Footer Actions */}
-        <div className="px-6 py-4 border-t border-slate-800 bg-slate-900/50 flex flex-col-reverse sm:flex-row items-center justify-between gap-3">
+        <div className="px-6 py-4 border-t border-theme-border bg-theme-card/50 flex flex-col-reverse sm:flex-row items-center justify-between gap-3">
           <button
             onClick={handleCopy}
-            className="w-full sm:w-auto px-4 py-2.5 rounded-xl border border-slate-700 hover:border-slate-600 bg-slate-800 hover:bg-slate-750 text-xs font-medium text-slate-200 transition-colors flex items-center justify-center gap-2"
+            className="w-full sm:w-auto px-4 py-2.5 rounded-xl border border-theme-border hover:border-theme-primary/50 bg-theme-panel hover:bg-theme-card text-xs font-medium text-theme-text transition-colors flex items-center justify-center gap-2"
           >
             {copied ? (
               <>
@@ -138,7 +157,7 @@ export const SafeLinkModal: React.FC<SafeLinkModalProps> = ({ url, isOpen, onClo
               </>
             ) : (
               <>
-                <Copy className="w-4 h-4 text-slate-400" />
+                <Copy className="w-4 h-4 text-theme-muted" />
                 Copy Link
               </>
             )}
@@ -147,15 +166,20 @@ export const SafeLinkModal: React.FC<SafeLinkModalProps> = ({ url, isOpen, onClo
           <div className="w-full sm:w-auto flex items-center gap-2">
             <button
               onClick={onClose}
-              className="w-full sm:w-auto px-4 py-2.5 rounded-xl text-xs font-medium text-slate-400 hover:text-white transition-colors"
+              className="w-full sm:w-auto px-4 py-2.5 rounded-xl text-xs font-medium text-theme-muted hover:text-theme-text transition-colors"
             >
               Cancel
             </button>
             <button
               onClick={handleOpen}
-              className="w-full sm:w-auto px-5 py-2.5 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-slate-950 text-xs font-bold transition-colors flex items-center justify-center gap-2 shadow-lg shadow-cyan-500/20"
+              disabled={!isValidWebUrl || isBlockedScheme}
+              className={`w-full sm:w-auto px-5 py-2.5 rounded-xl text-xs font-bold transition-colors flex items-center justify-center gap-2 shadow-lg ${
+                isValidWebUrl && !isBlockedScheme
+                  ? "bg-theme-primary hover:opacity-90 text-theme-bg shadow-theme-primary/20"
+                  : "bg-theme-panel text-theme-muted cursor-not-allowed border border-theme-border"
+              }`}
             >
-              <span>Open Link</span>
+              <span>{isBlockedScheme ? "Blocked Protocol" : "Open Link"}</span>
               <ExternalLink className="w-4 h-4" />
             </button>
           </div>

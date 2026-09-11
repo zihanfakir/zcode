@@ -1,8 +1,10 @@
 import { CRC16 } from "./crc.js";
 import { ZCodeDetector, ImageBuffer } from "./detector.js";
-import { ZCodeFormat, ZCodePayload, V1_TOTAL_DATA_BYTES, V1_ECC_BYTES } from "./format.js";
+import { ZCodeFormat, ZCodePayload, ZCodeDataType, URL_PREFIXES, V1_TOTAL_DATA_BYTES, V1_ECC_BYTES } from "./format.js";
 import { ZCodeGeometry } from "./geometry.js";
 import { ReedSolomon } from "./reedsolomon.js";
+import { ZCodeCrypto } from "./crypto.js";
+
 
 export interface ZCodeDecodedResult {
   payload: ZCodePayload;
@@ -77,7 +79,7 @@ export class ZCodeDecoder {
   }
 
   /**
-   * Decodes a 392-element boolean bit array directly.
+   * Decodes a boolean bit array directly.
    */
   public decodeBits(
     bits: boolean[],
@@ -88,7 +90,7 @@ export class ZCodeDecoder {
       throw new Error(`Invalid bit length: ${bits.length} != ${ZCodeGeometry.TOTAL_BITS}`);
     }
 
-    // Assemble 392 bits into 49 bytes
+    // Assemble bits into bytes
     const receivedCodeword = new Uint8Array(ZCodeGeometry.TOTAL_BYTES);
     let bitIdx = 0;
     for (let i = 0; i < ZCodeGeometry.TOTAL_BYTES; i++) {
@@ -136,4 +138,51 @@ export class ZCodeDecoder {
       location,
     };
   }
+
+  /**
+   * Unlocks a password-protected ZCodePayload using AES-256-GCM authenticated decryption.
+   */
+  public static async unlock(payload: ZCodePayload, password: string): Promise<ZCodePayload> {
+    if (!payload.isLocked) {
+      return payload;
+    }
+
+    if (!payload.encryptedData) {
+      throw new Error("Cannot unlock Z-Code: missing encrypted payload data.");
+    }
+
+    // Unpack envelope: salt (8B), iv (12B), tag (16B), ciphertext
+    const envelope = ZCodeCrypto.unpackEnvelope(payload.encryptedData);
+
+    // Decrypt via Web Crypto AES-256-GCM
+    const decryptedBytes = await ZCodeCrypto.decrypt(password, envelope);
+
+    // Decode plaintext
+    const decoder = new TextDecoder("utf-8");
+    let content = decoder.decode(decryptedBytes);
+
+    // Apply URL prefix expansion if necessary
+    if (payload.type === ZCodeDataType.URL && payload.flags !== undefined) {
+      const prefixIndex = payload.flags & 0x0F;
+      if (prefixIndex > 0 && prefixIndex < URL_PREFIXES.length) {
+        content = URL_PREFIXES[prefixIndex] + content;
+      }
+    }
+
+    return {
+      type: payload.type,
+      content,
+      version: payload.version,
+      isLocked: false,
+      flags: payload.flags,
+    };
+  }
+
+  /**
+   * Instance helper to unlock a password-protected payload.
+   */
+  public async unlock(payload: ZCodePayload, password: string): Promise<ZCodePayload> {
+    return ZCodeDecoder.unlock(payload, password);
+  }
 }
+

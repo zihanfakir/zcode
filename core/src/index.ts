@@ -7,3 +7,4 @@ export * from "./encoder.js";
 export * from "./renderer.js";
 export * from "./detector.js";
 export * from "./decoder.js";
+export * from "./crypto.js";

@@ -88,6 +88,9 @@ export class GaloisField {
   }
 
   public polyMul(p: Uint8Array | number[], q: Uint8Array | number[]): Uint8Array {
+    if (p.length === 0 || q.length === 0) {
+      return new Uint8Array(0);
+    }
     const result = new Uint8Array(p.length + q.length - 1);
     for (let i = 0; i < p.length; i++) {
       for (let j = 0; j < q.length; j++) {
@@ -113,6 +116,20 @@ export class GaloisField {
     dividend: Uint8Array | number[],
     divisor: Uint8Array | number[]
   ): { quotient: Uint8Array; remainder: Uint8Array } {
+    if (divisor.length === 0 || divisor[0] === 0) {
+      throw new Error("GF division by zero or invalid divisor polynomial");
+    }
+
+    const remainderLen = divisor.length - 1;
+    if (dividend.length < divisor.length) {
+      const remainder = new Uint8Array(remainderLen);
+      remainder.set(dividend, remainderLen - dividend.length);
+      return {
+        quotient: new Uint8Array(0),
+        remainder,
+      };
+    }
+
     const out = new Uint8Array(dividend);
     const divisorLead = divisor[0];
     const divisorLeadInv = this.inv(divisorLead);
@@ -126,11 +143,9 @@ export class GaloisField {
       }
     }
 
-    const remainderLen = divisor.length - 1;
-    const remainder = out.slice(out.length - remainderLen);
     return {
       quotient: out.slice(0, out.length - remainderLen),
-      remainder,
+      remainder: out.slice(out.length - remainderLen),
     };
   }
 }

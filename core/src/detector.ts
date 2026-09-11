@@ -182,11 +182,7 @@ export class ZCodeDetector {
     const fallbackRefined = this.refineCircle(gray, width, height, width / 2, height / 2, fallbackRadius);
     if (fallbackRefined) return fallbackRefined;
 
-    return {
-      cx: width / 2,
-      cy: height / 2,
-      radius: fallbackRadius,
-    };
+    return null;
   }
 
   /**
@@ -278,7 +274,7 @@ export class ZCodeDetector {
       let corr = 0;
       for (let bitIdx = 0; bitIdx < ZCodeGeometry.ORIENTATION_SECTORS; bitIdx++) {
         const bitAngleDeg = (bitIdx * 360) / ZCodeGeometry.ORIENTATION_SECTORS;
-        const sampleIdx = Math.round((shift + bitAngleDeg) % numSamples);
+        const sampleIdx = ((Math.round(shift + bitAngleDeg) % numSamples) + numSamples) % numSamples;
         const expectedBit = ZCodeGeometry.SYNC_PATTERN[bitIdx];
         const weight = expectedBit === 1 ? 1.0 : -0.8;
         corr += sampledIntensities[sampleIdx] * weight;

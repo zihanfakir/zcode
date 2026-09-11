@@ -80,3 +80,10 @@ const urlData = encoder.encode("https://example.com");
 const urlImg = ZCodeRenderer.renderToImageBuffer(urlData, { size: 512, margin: 24 });
 writePng(path.join(samplesDir, "example_url.png"), urlImg);
 console.log("Generated samples/example_url.png");
+
+// 3. Password protected: "Hello Zihan" with password "zihan123"
+const lockedData = await encoder.encode("Hello Zihan", { password: "zihan123" });
+const lockedImg = ZCodeRenderer.renderToImageBuffer(lockedData, { size: 512, margin: 24 });
+writePng(path.join(samplesDir, "locked_secret.png"), lockedImg);
+console.log("Generated samples/locked_secret.png");
+

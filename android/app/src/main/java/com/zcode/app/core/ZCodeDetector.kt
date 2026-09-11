@@ -32,13 +32,13 @@ object ZCodeDetector {
     }
 
     fun sampleBilinear(gray: ByteArray, width: Int, height: Int, x: Float, y: Float): Float {
-        val ix = x.toInt()
-        val iy = y.toInt()
-        if (ix < 0 || ix >= width - 1 || iy < 0 || iy >= height - 1) {
+        if (x < 0f || x >= (width - 1).toFloat() || y < 0f || y >= (height - 1).toFloat()) {
             val cx = x.coerceIn(0f, (width - 1).toFloat()).toInt()
             val cy = y.coerceIn(0f, (height - 1).toFloat()).toInt()
             return (gray[cy * width + cx].toInt() and 0xFF).toFloat()
         }
+        val ix = x.toInt()
+        val iy = y.toInt()
         val dx = x - ix
         val dy = y - iy
 
@@ -214,8 +214,8 @@ object ZCodeDetector {
         for (shift in 0 until numSamples) {
             var corr = 0f
             for (bitIdx in 0 until ZCodeGeometry.ORIENTATION_SECTORS) {
-                val bitAngleDeg = (bitIdx * 360) / ZCodeGeometry.ORIENTATION_SECTORS
-                val sampleIdx = (shift + bitAngleDeg) % numSamples
+                val bitAngleDeg = (bitIdx * 360f) / ZCodeGeometry.ORIENTATION_SECTORS
+                val sampleIdx = ((shift + Math.round(bitAngleDeg)) % numSamples + numSamples) % numSamples
                 val expectedBit = ZCodeGeometry.SYNC_PATTERN[bitIdx]
                 val weight = if (expectedBit == 1) 1.0f else -0.8f
                 corr += sampledIntensities[sampleIdx] * weight

@@ -36,33 +36,39 @@ class GaloisField {
     fun sub(a: Int, b: Int): Int = (a xor b) and 0xFF
 
     fun mul(a: Int, b: Int): Int {
-        if (a == 0 || b == 0) return 0
-        return expTable[logTable[a] + logTable[b]]
+        val ma = a and 0xFF
+        val mb = b and 0xFF
+        if (ma == 0 || mb == 0) return 0
+        return expTable[logTable[ma] + logTable[mb]]
     }
 
     fun div(a: Int, b: Int): Int {
-        if (b == 0) throw ArithmeticException("GF division by zero")
-        if (a == 0) return 0
-        val diff = logTable[a] - logTable[b] + 255
+        val ma = a and 0xFF
+        val mb = b and 0xFF
+        if (mb == 0) throw ArithmeticException("GF division by zero")
+        if (ma == 0) return 0
+        val diff = logTable[ma] - logTable[mb] + 255
         return expTable[diff % 255]
     }
 
     fun inv(a: Int): Int {
-        if (a == 0) throw ArithmeticException("GF inversion of zero")
-        return expTable[255 - logTable[a]]
+        val ma = a and 0xFF
+        if (ma == 0) throw ArithmeticException("GF inversion of zero")
+        return expTable[255 - logTable[ma]]
     }
 
     fun exp(power: Int): Int = expTable[((power % 255) + 255) % 255]
 
     fun log(a: Int): Int {
-        if (a == 0) throw ArithmeticException("GF logarithm of zero")
-        return logTable[a]
+        val ma = a and 0xFF
+        if (ma == 0) throw ArithmeticException("GF logarithm of zero")
+        return logTable[ma]
     }
 
     fun polyEval(poly: IntArray, x: Int): Int {
         var y = 0
         for (c in poly) {
-            y = mul(y, x) xor c
+            y = mul(y, x) xor (c and 0xFF)
         }
         return y
     }
@@ -81,6 +87,7 @@ class GaloisField {
     }
 
     fun polyMul(p: IntArray, q: IntArray): IntArray {
+        if (p.isEmpty() || q.isEmpty()) return IntArray(0)
         val result = IntArray(p.size + q.size - 1)
         for (i in p.indices) {
             for (j in q.indices) {
@@ -99,6 +106,12 @@ class GaloisField {
     }
 
     fun polyDiv(dividend: IntArray, divisor: IntArray): Pair<IntArray, IntArray> {
+        if (divisor.isEmpty() || (divisor[0] and 0xFF) == 0) {
+            throw IllegalArgumentException("Divisor cannot be empty or have zero leading coefficient")
+        }
+        if (dividend.size < divisor.size) {
+            return Pair(IntArray(0), dividend.clone())
+        }
         val out = dividend.clone()
         val divisorLeadInv = inv(divisor[0])
 

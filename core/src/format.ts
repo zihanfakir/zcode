@@ -11,24 +11,27 @@ export interface ZCodePayload {
   type: ZCodeDataType;
   content: string;
   version: number;
+  isLocked: boolean;
+  flags?: number;
+  encryptedData?: Uint8Array;
 }
 
 export const ZCODE_MAGIC_0 = 0x5A; // 'Z'
 export const ZCODE_MAGIC_1 = 0x43; // 'C'
 export const ZCODE_VERSION_1 = 0x01;
 
-// Packet structural constants for Version 1
-export const V1_MAX_PAYLOAD_BYTES = 30;
+// Flag bit definitions
+export const FLAG_ENCRYPTED = 0x80; // Bit 7: 1 = Password protected / AES-256-GCM encrypted
+
+// Packet structural constants for Version 1 (10 data tracks, 680 bits = 85 bytes)
 export const V1_DATA_HEADER_BYTES = 6; // [Magic0, Magic1, Version, DataType, Flags, PayloadLen]
 export const V1_CRC_BYTES = 2;
-export const V1_ECC_BYTES = 10;
-export const V1_DATA_BLOCK_BYTES = V1_DATA_HEADER_BYTES + V1_MAX_PAYLOAD_BYTES + V1_CRC_BYTES; // 6 + 30 + 2 = 38 bytes
-// Total codeword: 38 + 10 = 48 bytes = 384 bits or 49 bytes = 392 bits.
-// Let's align exactly with our 7 data tracks (32 + 40 + 48 + 56 + 64 + 72 + 80 = 392 bits = 49 bytes):
-// 49 bytes = 39 data bytes (6 header + 31 payload + 2 CRC) + 10 ECC bytes!
-export const V1_MAX_PAYLOAD = 31;
-export const V1_TOTAL_DATA_BYTES = 39; // 6 header + 31 max payload + 2 CRC = 39 bytes
-export const V1_TOTAL_CODEWORD_BYTES = 49; // 39 data + 10 ECC = 49 bytes = 392 bits!
+export const V1_ECC_BYTES = 14; // RS(85, 71) ECC corrects up to 7 corrupted bytes
+export const V1_MAX_PAYLOAD = 63; // 63 bytes payload
+export const V1_MAX_PAYLOAD_BYTES = V1_MAX_PAYLOAD;
+export const V1_TOTAL_DATA_BYTES = V1_DATA_HEADER_BYTES + V1_MAX_PAYLOAD + V1_CRC_BYTES; // 6 + 63 + 2 = 71 bytes
+export const V1_TOTAL_CODEWORD_BYTES = V1_TOTAL_DATA_BYTES + V1_ECC_BYTES; // 71 + 14 = 85 bytes = 680 bits
+export const V1_MAX_ENCRYPTED_PAYLOAD = 27; // 63 max payload - 36 crypto overhead = 27 bytes ciphertext
 
 export const URL_PREFIXES = [
   "",                 // 0: None
@@ -49,27 +52,9 @@ export class ZCodeFormat {
   }
 
   /**
-   * Serializes a text or URL payload into a 39-byte unencoded data block (before ECC).
+   * Packs raw payload bytes with header and deterministic padding into a 71-byte data block.
    */
-  public static pack(type: ZCodeDataType, rawContent: string): Uint8Array {
-    let content = rawContent.trim();
-    let flags = 0;
-
-    if (type === ZCodeDataType.URL) {
-      // Check for prefix compression
-      for (let i = 1; i < URL_PREFIXES.length; i++) {
-        const prefix = URL_PREFIXES[i];
-        if (content.toLowerCase().startsWith(prefix)) {
-          flags = i;
-          content = content.slice(prefix.length);
-          break;
-        }
-      }
-    }
-
-    const encoder = new TextEncoder();
-    const payloadBytes = encoder.encode(content);
-
+  public static packRaw(type: ZCodeDataType, flags: number, payloadBytes: Uint8Array): Uint8Array {
     if (payloadBytes.length > V1_MAX_PAYLOAD) {
       throw new Error(
         `Payload length (${payloadBytes.length} bytes) exceeds Z-Code V1 limit of ${V1_MAX_PAYLOAD} bytes.`
@@ -96,7 +81,32 @@ export class ZCodeFormat {
   }
 
   /**
-   * Unpacks a verified 39-byte data block into a ZCodePayload object.
+   * Serializes a text or URL payload into a 71-byte unencoded data block (before ECC).
+   */
+  public static pack(type: ZCodeDataType, rawContent: string): Uint8Array {
+    let content = type === ZCodeDataType.URL ? rawContent.trim() : rawContent;
+    let flags = 0;
+
+    if (type === ZCodeDataType.URL) {
+      // Check for prefix compression - check longest prefixes first (5, then 3, 4, 1, 2)
+      const prefixOrder = [5, 3, 4, 1, 2];
+      for (const idx of prefixOrder) {
+        const prefix = URL_PREFIXES[idx];
+        if (content.toLowerCase().startsWith(prefix)) {
+          flags = idx;
+          content = content.slice(prefix.length);
+          break;
+        }
+      }
+    }
+
+    const encoder = new TextEncoder();
+    const payloadBytes = encoder.encode(content);
+    return this.packRaw(type, flags, payloadBytes);
+  }
+
+  /**
+   * Unpacks a verified 71-byte data block into a ZCodePayload object.
    */
   public static unpack(dataBlock: Uint8Array): ZCodePayload {
     if (dataBlock.length < V1_DATA_HEADER_BYTES + V1_CRC_BYTES) {
@@ -125,6 +135,20 @@ export class ZCodeFormat {
     }
 
     const payloadRaw = dataBlock.slice(V1_DATA_HEADER_BYTES, V1_DATA_HEADER_BYTES + payloadLen);
+
+    const isLocked = (flags & FLAG_ENCRYPTED) !== 0;
+
+    if (isLocked) {
+      return {
+        type,
+        content: "",
+        version,
+        isLocked: true,
+        flags,
+        encryptedData: payloadRaw,
+      };
+    }
+
     const decoder = new TextDecoder("utf-8");
     let content = decoder.decode(payloadRaw);
 
@@ -139,6 +163,8 @@ export class ZCodeFormat {
       type,
       content,
       version,
+      isLocked: false,
+      flags,
     };
   }
 }

@@ -43,23 +43,26 @@ export class ZCodeGeometry {
   public static readonly OUTER_RING_INNER_RADIUS = 0.96;
   public static readonly OUTER_RING_OUTER_RADIUS = 1.00;
 
-  // Data tracks configuration: 7 tracks, 392 bits = 49 bytes
+  // Data tracks configuration: 10 tracks, 680 bits = 85 bytes
   public static readonly DATA_TRACKS: readonly TrackConfig[] = [
-    { trackIndex: 0, radius: 0.34, numSectors: 32, dotRadius: 0.024 },
-    { trackIndex: 1, radius: 0.43, numSectors: 40, dotRadius: 0.024 },
-    { trackIndex: 2, radius: 0.52, numSectors: 48, dotRadius: 0.024 },
-    { trackIndex: 3, radius: 0.61, numSectors: 56, dotRadius: 0.024 },
-    { trackIndex: 4, radius: 0.70, numSectors: 64, dotRadius: 0.024 },
-    { trackIndex: 5, radius: 0.79, numSectors: 72, dotRadius: 0.024 },
-    { trackIndex: 6, radius: 0.88, numSectors: 80, dotRadius: 0.024 },
+    { trackIndex: 0, radius: 0.34, numSectors: 32, dotRadius: 0.020 },
+    { trackIndex: 1, radius: 0.40, numSectors: 40, dotRadius: 0.020 },
+    { trackIndex: 2, radius: 0.46, numSectors: 48, dotRadius: 0.020 },
+    { trackIndex: 3, radius: 0.52, numSectors: 56, dotRadius: 0.020 },
+    { trackIndex: 4, radius: 0.58, numSectors: 64, dotRadius: 0.020 },
+    { trackIndex: 5, radius: 0.64, numSectors: 72, dotRadius: 0.020 },
+    { trackIndex: 6, radius: 0.70, numSectors: 80, dotRadius: 0.020 },
+    { trackIndex: 7, radius: 0.76, numSectors: 88, dotRadius: 0.020 },
+    { trackIndex: 8, radius: 0.82, numSectors: 96, dotRadius: 0.020 },
+    { trackIndex: 9, radius: 0.88, numSectors: 104, dotRadius: 0.020 },
   ];
 
   public static readonly TOTAL_BITS = ZCodeGeometry.DATA_TRACKS.reduce(
     (sum, t) => sum + t.numSectors,
     0
-  ); // 392 bits
+  ); // 680 bits
 
-  public static readonly TOTAL_BYTES = ZCodeGeometry.TOTAL_BITS / 8; // 49 bytes
+  public static readonly TOTAL_BYTES = ZCodeGeometry.TOTAL_BITS / 8; // 85 bytes
 
   /**
    * Converts polar coordinates (r in [0, 1], theta in rad) to cartesian (x, y)

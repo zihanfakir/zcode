@@ -28,15 +28,18 @@ object ZCodeGeometry {
     const val OUTER_RING_OUTER_RADIUS = 1.00f
 
     val DATA_TRACKS = arrayOf(
-        TrackConfig(0, 0.34f, 32, 0.024f),
-        TrackConfig(1, 0.43f, 40, 0.024f),
-        TrackConfig(2, 0.52f, 48, 0.024f),
-        TrackConfig(3, 0.61f, 56, 0.024f),
-        TrackConfig(4, 0.70f, 64, 0.024f),
-        TrackConfig(5, 0.79f, 72, 0.024f),
-        TrackConfig(6, 0.88f, 80, 0.024f)
+        TrackConfig(0, 0.34f, 32, 0.020f),
+        TrackConfig(1, 0.40f, 40, 0.020f),
+        TrackConfig(2, 0.46f, 48, 0.020f),
+        TrackConfig(3, 0.52f, 56, 0.020f),
+        TrackConfig(4, 0.58f, 64, 0.020f),
+        TrackConfig(5, 0.64f, 72, 0.020f),
+        TrackConfig(6, 0.70f, 80, 0.020f),
+        TrackConfig(7, 0.76f, 88, 0.020f),
+        TrackConfig(8, 0.82f, 96, 0.020f),
+        TrackConfig(9, 0.88f, 104, 0.020f)
     )
 
-    val TOTAL_BITS = DATA_TRACKS.sumOf { it.numSectors } // 392 bits
-    val TOTAL_BYTES = TOTAL_BITS / 8 // 49 bytes
+    val TOTAL_BITS = DATA_TRACKS.sumOf { it.numSectors } // 680 bits
+    val TOTAL_BYTES = TOTAL_BITS / 8 // 85 bytes
 }

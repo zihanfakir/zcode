@@ -13,13 +13,49 @@ data class ZCodeEncodedData(
     val type: ZCodeDataType,
     val content: String,
     val bytes: ByteArray,
-    val bits: BooleanArray
-)
+    val bits: BooleanArray,
+    val isLocked: Boolean = false
+) {
+    override fun equals(other: Any?): Boolean {
+        if (this === other) return true
+        if (javaClass != other?.javaClass) return false
+
+        other as ZCodeEncodedData
+
+        if (type != other.type) return false
+        if (content != other.content) return false
+        if (!bytes.contentEquals(other.bytes)) return false
+        if (!bits.contentEquals(other.bits)) return false
+        if (isLocked != other.isLocked) return false
+
+        return true
+    }
+
+    override fun hashCode(): Int {
+        var result = type.hashCode()
+        result = 31 * result + content.hashCode()
+        result = 31 * result + bytes.contentHashCode()
+        result = 31 * result + bits.contentHashCode()
+        result = 31 * result + isLocked.hashCode()
+        return result
+    }
+}
 
 class ZCodeEncoder {
     private val rs = ReedSolomon(ZCodeFormat.ECC_BYTES)
 
-    fun encode(content: String, forceType: ZCodeDataType? = null): ZCodeEncodedData {
+    fun encode(
+        content: String,
+        password: String? = null,
+        forceType: ZCodeDataType? = null
+    ): ZCodeEncodedData {
+        if (password.isNullOrEmpty()) {
+            return encodeUnprotected(content, forceType)
+        }
+        return encodeProtected(content, password, forceType)
+    }
+
+    private fun encodeUnprotected(content: String, forceType: ZCodeDataType? = null): ZCodeEncodedData {
         val type = forceType ?: if (ZCodeFormat.isUrl(content)) ZCodeDataType.URL else ZCodeDataType.TEXT
         val dataBlock = ZCodeFormat.pack(type, content)
 
@@ -29,7 +65,62 @@ class ZCodeEncoder {
         dataBlock[ZCodeFormat.TOTAL_DATA_BYTES - 2] = ((crc ushr 8) and 0xFF).toByte()
         dataBlock[ZCodeFormat.TOTAL_DATA_BYTES - 1] = (crc and 0xFF).toByte()
 
-        // Reed-Solomon
+        // Reed-Solomon Parity (14 bytes) -> 85 bytes total codeword
+        val fullCodeword = rs.encode(dataBlock)
+
+        // Expand to bits (680 bits)
+        val bits = BooleanArray(ZCodeGeometry.TOTAL_BITS)
+        var bitIdx = 0
+        for (b in fullCodeword) {
+            val byteVal = b.toInt() and 0xFF
+            for (i in 7 downTo 0) {
+                bits[bitIdx++] = ((byteVal ushr i) and 1) == 1
+            }
+        }
+
+        return ZCodeEncodedData(type, content, fullCodeword, bits, isLocked = false)
+    }
+
+    private fun encodeProtected(
+        content: String,
+        password: String,
+        forceType: ZCodeDataType? = null
+    ): ZCodeEncodedData {
+        val type = forceType ?: if (ZCodeFormat.isUrl(content)) ZCodeDataType.URL else ZCodeDataType.TEXT
+        var textToEncrypt = if (type == ZCodeDataType.URL) content.trim() else content
+        var flags = ZCodeFormat.FLAG_ENCRYPTED
+
+        if (type == ZCodeDataType.URL) {
+            val prefixOrder = intArrayOf(3, 4, 1, 2)
+            for (idx in prefixOrder) {
+                val prefix = ZCodeFormat.URL_PREFIXES[idx]
+                if (textToEncrypt.startsWith(prefix, ignoreCase = true)) {
+                    flags = flags or idx
+                    textToEncrypt = textToEncrypt.substring(prefix.length)
+                    break
+                }
+            }
+        }
+
+        val plaintextBytes = textToEncrypt.toByteArray(java.nio.charset.StandardCharsets.UTF_8)
+        if (plaintextBytes.size > ZCodeFormat.MAX_ENCRYPTED_PAYLOAD) {
+            throw IllegalArgumentException(
+                "Payload exceeds maximum password-protected limit of ${ZCodeFormat.MAX_ENCRYPTED_PAYLOAD} bytes"
+            )
+        }
+
+        val envelope = ZCodeCrypto.encrypt(password, plaintextBytes)
+        val packedEnvelope = ZCodeCrypto.packEnvelope(envelope)
+
+        val dataBlock = ZCodeFormat.packRaw(type, flags, packedEnvelope)
+
+        // CRC-16
+        val dataForCrc = dataBlock.copyOfRange(0, ZCodeFormat.TOTAL_DATA_BYTES - 2)
+        val crc = CRC16.calculate(dataForCrc)
+        dataBlock[ZCodeFormat.TOTAL_DATA_BYTES - 2] = ((crc ushr 8) and 0xFF).toByte()
+        dataBlock[ZCodeFormat.TOTAL_DATA_BYTES - 1] = (crc and 0xFF).toByte()
+
+        // Reed-Solomon Parity
         val fullCodeword = rs.encode(dataBlock)
 
         // Expand to bits
@@ -42,8 +133,9 @@ class ZCodeEncoder {
             }
         }
 
-        return ZCodeEncodedData(type, content, fullCodeword, bits)
+        return ZCodeEncodedData(type, content, fullCodeword, bits, isLocked = true)
     }
+
 
     fun renderBitmap(
         data: ZCodeEncodedData,

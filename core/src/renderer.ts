@@ -131,6 +131,13 @@ export class ZCodeRenderer {
   }
 
   /**
+   * Alias for renderToSVG
+   */
+  public static renderSVG(data: ZCodeEncodedData, options: RenderOptions = {}): string {
+    return this.renderToSVG(data, options);
+  }
+
+  /**
    * Renders Z-Code onto an HTML5 CanvasRenderingContext2D.
    * Works on web browsers, node-canvas, or offscreen canvas.
    */

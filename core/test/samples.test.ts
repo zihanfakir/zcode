@@ -59,3 +59,23 @@ test("Decode official sample: example_url.png", () => {
   assert.equal(result.payload.type, ZCodeDataType.URL);
   assert.equal(result.payload.content, "https://example.com");
 });
+
+test("Decode official sample: locked_secret.png (Password Protected)", async () => {
+  const decoder = new ZCodeDecoder();
+  const img = readPng(path.join(samplesDir, "locked_secret.png"));
+  const result = decoder.decodeImage(img);
+
+  assert.equal(result.payload.isLocked, true);
+  assert.equal(result.payload.content, "");
+
+  // Wrong password should fail
+  await assert.rejects(async () => {
+    await ZCodeDecoder.unlock(result.payload, "wrong_password");
+  });
+
+  // Correct password should unlock payload
+  const unlocked = await ZCodeDecoder.unlock(result.payload, "zihan123");
+  assert.equal(unlocked.isLocked, false);
+  assert.equal(unlocked.content, "Hello Zihan");
+});
+
