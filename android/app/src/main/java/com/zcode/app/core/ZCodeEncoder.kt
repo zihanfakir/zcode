@@ -143,7 +143,7 @@ class ZCodeEncoder {
         fgColor: Int = Color.rgb(15, 23, 42),
         bgColor: Int = Color.WHITE,
         margin: Int = 24,
-        showCenterZ: Boolean = true
+        showCenterZ: Boolean = false
     ): Bitmap {
         val bitmap = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bitmap)

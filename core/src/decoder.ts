@@ -52,26 +52,30 @@ export class ZCodeDecoder {
       location.radius
     );
 
-    // 3. Multi-pass sub-degree angle sampling: try 0, +0.5, -0.5, +1.0, -1.0, +1.5, -1.5, +2.0, -2.0 deg
+    // 3. Multi-pass sub-degree angle and radius sampling
     const candidateOffsets = [0, 0.5, -0.5, 1.0, -1.0, 1.5, -1.5, 2.0, -2.0];
+    const candidateRadii = [1.0, 0.99, 1.01, 0.98, 1.02];
     let lastError: Error | null = null;
 
-    for (const degOffset of candidateOffsets) {
-      const angle = rotation + (degOffset * Math.PI) / 180;
-      const bits = ZCodeDetector.sampleBits(
-        gray,
-        width,
-        height,
-        location.cx,
-        location.cy,
-        location.radius,
-        angle
-      );
+    for (const radScale of candidateRadii) {
+      const curRadius = location.radius * radScale;
+      for (const degOffset of candidateOffsets) {
+        const angle = rotation + (degOffset * Math.PI) / 180;
+        const bits = ZCodeDetector.sampleBits(
+          gray,
+          width,
+          height,
+          location.cx,
+          location.cy,
+          curRadius,
+          angle
+        );
 
-      try {
-        return this.decodeBits(bits, angle, location);
-      } catch (err) {
-        lastError = err as Error;
+        try {
+          return this.decodeBits(bits, angle, { ...location, radius: curRadius });
+        } catch (err) {
+          lastError = err as Error;
+        }
       }
     }
 

@@ -31,26 +31,30 @@ class ZCodeDecoder {
             location.radius
         )
 
-        // Multi-pass sub-degree offsets
+        // Multi-pass sub-degree offsets and radius scaling
         val candidateOffsets = floatArrayOf(0f, 0.5f, -0.5f, 1.0f, -1.0f, 1.5f, -1.5f, 2.0f, -2.0f)
+        val candidateRadii = floatArrayOf(1.0f, 0.99f, 1.01f, 0.98f, 1.02f)
         var lastError: Exception? = null
 
-        for (degOffset in candidateOffsets) {
-            val angle = rotation + (degOffset * PI.toFloat()) / 180f
-            val bits = ZCodeDetector.sampleBits(
-                gray,
-                width,
-                height,
-                location.cx,
-                location.cy,
-                location.radius,
-                angle
-            )
+        for (radScale in candidateRadii) {
+            val curRadius = location.radius * radScale
+            for (degOffset in candidateOffsets) {
+                val angle = rotation + (degOffset * PI.toFloat()) / 180f
+                val bits = ZCodeDetector.sampleBits(
+                    gray,
+                    width,
+                    height,
+                    location.cx,
+                    location.cy,
+                    curRadius,
+                    angle
+                )
 
-            try {
-                return decodeBits(bits, angle, location)
-            } catch (e: Exception) {
-                lastError = e
+                try {
+                    return decodeBits(bits, angle, location.copy(radius = curRadius))
+                } catch (e: Exception) {
+                    lastError = e
+                }
             }
         }
 

@@ -7,7 +7,7 @@ export interface RenderOptions {
   foregroundColor?: string; // Default: "#0F172A" (rich dark slate)
   backgroundColor?: string; // Default: "#FFFFFF"
   margin?: number;           // Margin in px (default 24)
-  showCenterZ?: boolean;     // Stylized Z glyph in center (default true)
+  showCenterZ?: boolean;     // Stylized Z glyph in center (default false)
   rotationAngle?: number;    // In radians (default 0)
 }
 
@@ -20,7 +20,7 @@ export class ZCodeRenderer {
     const fg = options.foregroundColor ?? "#0F172A";
     const bg = options.backgroundColor ?? "#FFFFFF";
     const margin = options.margin ?? 24;
-    const showZ = options.showCenterZ ?? true;
+    const showZ = options.showCenterZ ?? false;
     const rot = options.rotationAngle ?? 0;
 
     const cx = size / 2;
@@ -150,7 +150,7 @@ export class ZCodeRenderer {
     const fg = options.foregroundColor ?? "#0F172A";
     const bg = options.backgroundColor ?? "#FFFFFF";
     const margin = options.margin ?? 24;
-    const showZ = options.showCenterZ ?? true;
+    const showZ = options.showCenterZ ?? false;
     const rot = options.rotationAngle ?? 0;
 
     const cx = size / 2;

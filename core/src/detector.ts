@@ -63,24 +63,85 @@ export class ZCodeDetector {
    * Detects Z-Code circular boundary and center from a grayscale image.
    */
   public static locateCode(gray: Uint8Array, width: number, height: number): { cx: number; cy: number; radius: number } | null {
-    // Strategy 1: Center candidate detection using concentric bullseye ratio (1:1:2.5:1:1)
-    // Scan horizontal lines at regular step
-    const stepY = Math.max(2, Math.floor(height / 160));
-
-    // Compute dynamic binarization threshold (Otsu-like or global average)
     let sum = 0;
+    let minLum = 255;
+    let maxLum = 0;
     const sampleStep = Math.max(1, Math.floor(gray.length / 4000));
     let sampleCount = 0;
     for (let i = 0; i < gray.length; i += sampleStep) {
-      sum += gray[i];
+      const v = gray[i];
+      sum += v;
+      if (v < minLum) minLum = v;
+      if (v > maxLum) maxLum = v;
       sampleCount++;
     }
-    const avgThresh = sum / sampleCount;
 
-    // Fast concentric candidate search
-    const candidates: Array<{ x: number; y: number; estimatedR: number; centerDiskLen: number }> = [];
+    if (maxLum - minLum < 18) {
+      return null;
+    }
 
-    for (let y = stepY * 4; y < height - stepY * 4; y += stepY) {
+    const avgThresh = (minLum + maxLum) / 2;
+    const contrast = maxLum - minLum;
+
+    // Helper: Cross-verify vertically at column cx
+    const checkVertical = (cx: number, approxY: number, hDiskLen: number) => {
+      const colX = Math.round(cx);
+      if (colX < 2 || colX >= width - 2) return null;
+
+      let runLength = 0;
+      let isDark = gray[colX] < avgThresh;
+      const runs: Array<{ isDark: boolean; length: number; startY: number }> = [];
+
+      for (let y = 0; y < height; y++) {
+        const dark = gray[y * width + colX] < avgThresh;
+        if (dark === isDark) {
+          runLength++;
+        } else {
+          runs.push({ isDark, length: runLength, startY: y - runLength });
+          isDark = dark;
+          runLength = 1;
+        }
+      }
+      runs.push({ isDark, length: runLength, startY: height - runLength });
+
+      for (let i = 0; i <= runs.length - 5; i++) {
+        if (
+          runs[i].isDark &&
+          !runs[i + 1].isDark &&
+          runs[i + 2].isDark &&
+          !runs[i + 3].isDark &&
+          runs[i + 4].isDark
+        ) {
+          const r0 = runs[i].length;
+          const r1 = runs[i + 1].length;
+          const r2 = runs[i + 2].length;
+          const r3 = runs[i + 3].length;
+          const r4 = runs[i + 4].length;
+
+          const unit = (r0 + r1 + r3 + r4) / 4;
+          if (unit >= 1.5) {
+            const centerRatio = r2 / unit;
+            if (centerRatio >= 1.3 && centerRatio <= 4.2) {
+              const vertCy = runs[i + 2].startY + r2 / 2;
+              if (Math.abs(vertCy - approxY) <= Math.max(hDiskLen, r2) * 0.8) {
+                const aspectDiff = Math.abs(hDiskLen - r2) / Math.max(hDiskLen, r2);
+                if (aspectDiff < 0.40) {
+                  const estRadius = (r0 + r1 + r2 + r3 + r4) / 0.40;
+                  return { cy: vertCy, radius: estRadius, vDiskLen: r2 };
+                }
+              }
+            }
+          }
+        }
+      }
+      return null;
+    };
+
+    // Horizontal scanning for 1:1:2.6:1:1 candidate bullseye
+    const stepY = Math.max(2, Math.floor(height / 180));
+    const verifiedCandidates: Array<{ cx: number; cy: number; radius: number; diskLen: number }> = [];
+
+    for (let y = stepY * 2; y < height - stepY * 2; y += stepY) {
       let runLength = 0;
       let isDark = gray[y * width] < avgThresh;
       const runs: Array<{ isDark: boolean; length: number; startX: number }> = [];
@@ -97,7 +158,6 @@ export class ZCodeDetector {
       }
       runs.push({ isDark, length: runLength, startX: width - runLength });
 
-      // Check sequences of 5 runs: [Dark, Light, Dark, Light, Dark]
       for (let i = 0; i <= runs.length - 5; i++) {
         if (
           runs[i].isDark &&
@@ -108,79 +168,66 @@ export class ZCodeDetector {
         ) {
           const r0 = runs[i].length;
           const r1 = runs[i + 1].length;
-          const r2 = runs[i + 2].length; // Center disk
+          const r2 = runs[i + 2].length;
           const r3 = runs[i + 3].length;
           const r4 = runs[i + 4].length;
 
-          // Expected ratio: ~1 : 1 : 2.6 : 1 : 1
           const unit = (r0 + r1 + r3 + r4) / 4;
-          if (unit >= 2) {
+          if (unit >= 1.5) {
             const diff0 = Math.abs(r0 - unit) / unit;
             const diff1 = Math.abs(r1 - unit) / unit;
             const diff3 = Math.abs(r3 - unit) / unit;
             const diff4 = Math.abs(r4 - unit) / unit;
             const centerRatio = r2 / unit;
 
-            if (diff0 < 0.65 && diff1 < 0.65 && diff3 < 0.65 && diff4 < 0.65 && centerRatio >= 1.5 && centerRatio <= 4.0) {
-              const centerX = runs[i + 2].startX + r2 / 2;
-              // Center bullseye total diameter is 0.40 * codeRadius (from -0.20 to +0.20)
-              const estimatedCodeRadius = (r0 + r1 + r2 + r3 + r4) / 0.40;
-              candidates.push({ x: centerX, y, estimatedR: estimatedCodeRadius, centerDiskLen: r2 });
+            if (diff0 < 0.70 && diff1 < 0.70 && diff3 < 0.70 && diff4 < 0.70 && centerRatio >= 1.3 && centerRatio <= 4.2) {
+              const hCx = runs[i + 2].startX + r2 / 2;
+              const vertMatch = checkVertical(hCx, y, r2);
+              if (vertMatch) {
+                const estRadius = ((r0 + r1 + r2 + r3 + r4) / 0.40 + vertMatch.radius) / 2;
+                verifiedCandidates.push({
+                  cx: hCx,
+                  cy: vertMatch.cy,
+                  radius: estRadius,
+                  diskLen: (r2 + vertMatch.vDiskLen) / 2,
+                });
+              }
             }
           }
         }
       }
     }
 
-    // If candidate found via bullseye scan:
-    if (candidates.length > 0) {
-      // Find candidate with maximum center disk chord length (closest to true horizontal center diameter)
-      let bestCandidate = candidates[0];
-      for (const c of candidates) {
-        if (c.centerDiskLen > bestCandidate.centerDiskLen) {
-          bestCandidate = c;
+    if (verifiedCandidates.length > 0) {
+      let bestCluster: typeof verifiedCandidates = [];
+      for (const anchor of verifiedCandidates) {
+        const cluster = verifiedCandidates.filter(
+          (c) => Math.hypot(c.cx - anchor.cx, c.cy - anchor.cy) <= anchor.diskLen * 0.8
+        );
+        if (cluster.length > bestCluster.length) {
+          bestCluster = cluster;
         }
       }
 
-      // Refine (cx, cy) using orthogonal cross-sections of the central disk
-      const approxCx = bestCandidate.x;
-      const approxCy = bestCandidate.y;
+      const clusterToUse = bestCluster.length > 0 ? bestCluster : verifiedCandidates;
+      const approxCx = clusterToUse.reduce((s, c) => s + c.cx, 0) / clusterToUse.length;
+      const approxCy = clusterToUse.reduce((s, c) => s + c.cy, 0) / clusterToUse.length;
+      const approxR = clusterToUse.reduce((s, c) => s + c.radius, 0) / clusterToUse.length;
 
-      let leftX = approxCx;
-      while (leftX > 1 && gray[Math.round(approxCy) * width + Math.round(leftX)] < avgThresh) {
-        leftX--;
-      }
-      let rightX = approxCx;
-      while (rightX < width - 2 && gray[Math.round(approxCy) * width + Math.round(rightX)] < avgThresh) {
-        rightX++;
-      }
-      const refinedCx = (leftX + rightX) / 2;
-
-      let topY = approxCy;
-      while (topY > 1 && gray[Math.round(topY) * width + Math.round(refinedCx)] < avgThresh) {
-        topY--;
-      }
-      let bottomY = approxCy;
-      while (bottomY < height - 2 && gray[Math.round(bottomY) * width + Math.round(refinedCx)] < avgThresh) {
-        bottomY++;
-      }
-      const refinedCy = (topY + bottomY) / 2;
-
-      // Refine radius via radial ray casting from refined center
-      const refined = this.refineCircle(gray, width, height, refinedCx, refinedCy, bestCandidate.estimatedR);
+      const refined = this.refineCircle(gray, width, height, approxCx, approxCy, approxR, contrast);
       if (refined) return refined;
 
       return {
-        cx: refinedCx,
-        cy: refinedCy,
-        radius: bestCandidate.estimatedR,
+        cx: approxCx,
+        cy: approxCy,
+        radius: approxR,
       };
     }
 
-    // Fallback strategy: Image center and bounding box (for cropped scans / screenshots)
-    const fallbackRadius = Math.min(width, height) * 0.45;
-    const fallbackRefined = this.refineCircle(gray, width, height, width / 2, height / 2, fallbackRadius);
-    if (fallbackRefined) return fallbackRefined;
+    // Fallback: Viewfinder center and multiple candidate radii (ideal for live camera scanning)
+    const viewCenterRadius = Math.min(width, height) * 0.38;
+    const centerRefined = this.refineCircle(gray, width, height, width / 2, height / 2, viewCenterRadius, contrast);
+    if (centerRefined) return centerRefined;
 
     return null;
   }
@@ -194,10 +241,12 @@ export class ZCodeDetector {
     height: number,
     approxCx: number,
     approxCy: number,
-    approxRadius: number
+    approxRadius: number,
+    contrast: number = 60
   ): { cx: number; cy: number; radius: number } | null {
     const numRays = 36;
     const edgePoints: Array<{ x: number; y: number; r: number }> = [];
+    const minGrad = Math.max(15, contrast * 0.20);
 
     for (let k = 0; k < numRays; k++) {
       const angle = (k * 2 * Math.PI) / numRays;
@@ -205,8 +254,8 @@ export class ZCodeDetector {
       const sinA = Math.sin(angle);
 
       // Search from outside margin inwards toward center
-      const maxR = approxRadius * 1.25;
-      const minR = approxRadius * 0.80;
+      const maxR = Math.min(Math.min(width, height) * 0.49, approxRadius * 1.25);
+      const minR = approxRadius * 0.75;
 
       for (let r = maxR; r >= minR; r -= 1.0) {
         const x1 = approxCx + (r - 2) * cosA;
@@ -219,7 +268,7 @@ export class ZCodeDetector {
         // Outer ring outer edge: outer is light (margin), inner is dark (outer ring)
         const grad = valOuter - valInner;
 
-        if (grad > 80 && valInner < 128 && valOuter > 128) {
+        if (grad > minGrad) {
           edgePoints.push({
             x: approxCx + r * cosA,
             y: approxCy + r * sinA,
@@ -230,7 +279,7 @@ export class ZCodeDetector {
       }
     }
 
-    if (edgePoints.length >= 12) {
+    if (edgePoints.length >= 8) {
       const avgR = edgePoints.reduce((sum, p) => sum + p.r, 0) / edgePoints.length;
       return {
         cx: approxCx,
@@ -254,19 +303,24 @@ export class ZCodeDetector {
     radius: number
   ): number {
     const orientRadius = ZCodeGeometry.ORIENTATION_RADIUS * radius;
+    const dotR = ZCodeGeometry.ORIENTATION_DOT_RADIUS * radius;
     const numSamples = 360;
     const sampledIntensities = new Float32Array(numSamples);
 
-    // Sample intensities around orientation ring (inverted so dark dots = high value)
+    // Sample intensities around orientation ring with 3-point radial peak
     for (let deg = 0; deg < numSamples; deg++) {
       const rad = (deg * Math.PI) / 180;
-      const x = cx + orientRadius * Math.cos(rad);
-      const y = cy + orientRadius * Math.sin(rad);
-      sampledIntensities[deg] = 255 - this.sampleBilinear(gray, width, height, x, y);
+      const cosA = Math.cos(rad);
+      const sinA = Math.sin(rad);
+
+      const vCenter = 255 - this.sampleBilinear(gray, width, height, cx + orientRadius * cosA, cy + orientRadius * sinA);
+      const vInner = 255 - this.sampleBilinear(gray, width, height, cx + (orientRadius - dotR * 0.5) * cosA, cy + (orientRadius - dotR * 0.5) * sinA);
+      const vOuter = 255 - this.sampleBilinear(gray, width, height, cx + (orientRadius + dotR * 0.5) * cosA, cy + (orientRadius + dotR * 0.5) * sinA);
+
+      sampledIntensities[deg] = Math.max(vCenter, vInner, vOuter);
     }
 
     // Cross-correlate against the 32-bit SYNC_PATTERN
-    // Angle per sync bit = 360 / 32 = 11.25 degrees
     let bestDeg = 0;
     let maxCorrelation = -Infinity;
 
@@ -280,12 +334,12 @@ export class ZCodeDetector {
         corr += sampledIntensities[sampleIdx] * weight;
       }
 
-      // Also check directional key pip at orientation angle = 0, radius = 0.235 * radius
+      // Key pip bonus
       const keyRad = (shift * Math.PI) / 180;
       const keyX = cx + (0.235 * radius) * Math.cos(keyRad);
       const keyY = cy + (0.235 * radius) * Math.sin(keyRad);
       const keyVal = 255 - this.sampleBilinear(gray, width, height, keyX, keyY);
-      corr += keyVal * 1.5; // Bonus for alignment with directional key pip
+      corr += keyVal * 1.5;
 
       if (corr > maxCorrelation) {
         maxCorrelation = corr;
@@ -297,7 +351,7 @@ export class ZCodeDetector {
   }
 
   /**
-   * Samples bits from all 7 data tracks using polar sampling and adaptive thresholding.
+   * Samples bits from all data tracks using polar sampling and adaptive thresholding.
    */
   public static sampleBits(
     gray: Uint8Array,
@@ -310,11 +364,15 @@ export class ZCodeDetector {
   ): boolean[] {
     const bits: boolean[] = [];
 
+    // Reference black and white levels from bullseye
+    const centerDark = 255 - this.sampleBilinear(gray, width, height, cx, cy);
+    const gapDark = 255 - this.sampleBilinear(gray, width, height, cx + radius * 0.11, cy);
+    const refContrast = Math.max(20, centerDark - gapDark);
+
     for (const track of ZCodeGeometry.DATA_TRACKS) {
       const trackRadius = track.radius * radius;
       const numSectors = track.numSectors;
 
-      // Sample dark intensity (255 - luminance) for each sector
       const trackValues = new Float32Array(numSectors);
       let minVal = Infinity;
       let maxVal = -Infinity;
@@ -322,7 +380,6 @@ export class ZCodeDetector {
       for (let s = 0; s < numSectors; s++) {
         const angle = rotationAngle + (s / numSectors) * 2 * Math.PI;
 
-        // Multi-point sampling around expected dot center (cross shape)
         const cosA = Math.cos(angle);
         const sinA = Math.sin(angle);
         const dotOffset = track.dotRadius * radius * 0.4;
@@ -338,11 +395,18 @@ export class ZCodeDetector {
         if (avgVal > maxVal) maxVal = avgVal;
       }
 
-      // Adaptive threshold for this specific track
-      const threshold = minVal + (maxVal - minVal) * 0.45;
-
-      for (let s = 0; s < numSectors; s++) {
-        bits.push(trackValues[s] >= threshold);
+      const trackContrast = maxVal - minVal;
+      if (trackContrast < refContrast * 0.25) {
+        // Track is homogeneous
+        const isAllDark = maxVal > (gapDark + refContrast * 0.55);
+        for (let s = 0; s < numSectors; s++) {
+          bits.push(isAllDark);
+        }
+      } else {
+        const threshold = minVal + trackContrast * 0.45;
+        for (let s = 0; s < numSectors; s++) {
+          bits.push(trackValues[s] >= threshold);
+        }
       }
     }
 

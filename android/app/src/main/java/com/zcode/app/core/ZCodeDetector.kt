@@ -54,25 +54,81 @@ object ZCodeDetector {
     }
 
     fun locateCode(gray: ByteArray, width: Int, height: Int): CodeLocation? {
-        val stepY = maxOf(2, height / 160)
-
-        // Binarization threshold
         var sum = 0L
+        var minLum = 255
+        var maxLum = 0
         val sampleStep = maxOf(1, gray.size / 4000)
         var count = 0
         var i = 0
         while (i < gray.size) {
-            sum += (gray[i].toInt() and 0xFF)
+            val v = gray[i].toInt() and 0xFF
+            sum += v
+            if (v < minLum) minLum = v
+            if (v > maxLum) maxLum = v
             count++
             i += sampleStep
         }
-        val avgThresh = (sum / count).toFloat()
 
-        data class Candidate(val x: Float, val y: Float, val estimatedR: Float, val diskLen: Int)
-        val candidates = mutableListOf<Candidate>()
+        if (maxLum - minLum < 18) {
+            return null
+        }
 
-        var y = stepY * 4
-        while (y < height - stepY * 4) {
+        val avgThresh = ((minLum + maxLum) / 2).toFloat()
+        val contrast = (maxLum - minLum).toFloat()
+
+        fun checkVertical(cx: Float, approxY: Float, hDiskLen: Float): Triple<Float, Float, Float>? {
+            val colX = Math.round(cx)
+            if (colX < 2 || colX >= width - 2) return null
+
+            var runLen = 0
+            var isDark = (gray[colX].toInt() and 0xFF) < avgThresh
+            val runs = mutableListOf<Triple<Boolean, Int, Int>>() // isDark, length, startY
+
+            for (y in 0 until height) {
+                val dark = (gray[y * width + colX].toInt() and 0xFF) < avgThresh
+                if (dark == isDark) {
+                    runLen++
+                } else {
+                    runs.add(Triple(isDark, runLen, y - runLen))
+                    isDark = dark
+                    runLen = 1
+                }
+            }
+            runs.add(Triple(isDark, runLen, height - runLen))
+
+            for (idx in 0..(runs.size - 5)) {
+                if (runs[idx].first && !runs[idx + 1].first && runs[idx + 2].first && !runs[idx + 3].first && runs[idx + 4].first) {
+                    val r0 = runs[idx].second.toFloat()
+                    val r1 = runs[idx + 1].second.toFloat()
+                    val r2 = runs[idx + 2].second.toFloat()
+                    val r3 = runs[idx + 3].second.toFloat()
+                    val r4 = runs[idx + 4].second.toFloat()
+
+                    val unit = (r0 + r1 + r3 + r4) / 4f
+                    if (unit >= 1.5f) {
+                        val centerRatio = r2 / unit
+                        if (centerRatio in 1.3f..4.2f) {
+                            val vertCy = runs[idx + 2].third + r2 / 2f
+                            if (kotlin.math.abs(vertCy - approxY) <= maxOf(hDiskLen, r2) * 0.8f) {
+                                val aspectDiff = kotlin.math.abs(hDiskLen - r2) / maxOf(hDiskLen, r2)
+                                if (aspectDiff < 0.40f) {
+                                    val estRadius = (r0 + r1 + r2 + r3 + r4) / 0.40f
+                                    return Triple(vertCy, estRadius, r2)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            return null
+        }
+
+        val stepY = maxOf(2, height / 180)
+        data class Candidate(val cx: Float, val cy: Float, val radius: Float, val diskLen: Float)
+        val verifiedCandidates = mutableListOf<Candidate>()
+
+        var y = stepY * 2
+        while (y < height - stepY * 2) {
             var runLen = 0
             var isDark = (gray[y * width].toInt() and 0xFF) < avgThresh
             val runs = mutableListOf<Triple<Boolean, Int, Int>>() // isDark, length, startX
@@ -98,17 +154,20 @@ object ZCodeDetector {
                     val r4 = runs[idx + 4].second.toFloat()
 
                     val unit = (r0 + r1 + r3 + r4) / 4f
-                    if (unit >= 2f) {
+                    if (unit >= 1.5f) {
                         val diff0 = kotlin.math.abs(r0 - unit) / unit
                         val diff1 = kotlin.math.abs(r1 - unit) / unit
                         val diff3 = kotlin.math.abs(r3 - unit) / unit
                         val diff4 = kotlin.math.abs(r4 - unit) / unit
                         val centerRatio = r2 / unit
 
-                        if (diff0 < 0.65f && diff1 < 0.65f && diff3 < 0.65f && diff4 < 0.65f && centerRatio in 1.5f..4.0f) {
-                            val centerX = runs[idx + 2].third + r2 / 2f
-                            val estRadius = (r0 + r1 + r2 + r3 + r4) / 0.40f
-                            candidates.add(Candidate(centerX, y.toFloat(), estRadius, runs[idx + 2].second))
+                        if (diff0 < 0.70f && diff1 < 0.70f && diff3 < 0.70f && diff4 < 0.70f && centerRatio in 1.3f..4.2f) {
+                            val hCx = runs[idx + 2].third + r2 / 2f
+                            val vertMatch = checkVertical(hCx, y.toFloat(), r2)
+                            if (vertMatch != null) {
+                                val estRadius = ((r0 + r1 + r2 + r3 + r4) / 0.40f + vertMatch.second) / 2f
+                                verifiedCandidates.add(Candidate(hCx, vertMatch.first, estRadius, (r2 + vertMatch.third) / 2f))
+                            }
                         }
                     }
                 }
@@ -116,36 +175,28 @@ object ZCodeDetector {
             y += stepY
         }
 
-        if (candidates.isNotEmpty()) {
-            val bestCandidate = candidates.maxByOrNull { it.diskLen } ?: candidates[0]
+        if (verifiedCandidates.isNotEmpty()) {
+            var bestCluster = listOf<Candidate>()
+            for (anchor in verifiedCandidates) {
+                val cluster = verifiedCandidates.filter {
+                    hypot(it.cx - anchor.cx, it.cy - anchor.cy) <= anchor.diskLen * 0.8f
+                }
+                if (cluster.size > bestCluster.size) {
+                    bestCluster = cluster
+                }
+            }
 
-            // Orthogonal cross-section refinement
-            var leftX = bestCandidate.x.toInt()
-            while (leftX > 1 && (gray[bestCandidate.y.toInt() * width + leftX].toInt() and 0xFF) < avgThresh) {
-                leftX--
-            }
-            var rightX = bestCandidate.x.toInt()
-            while (rightX < width - 2 && (gray[bestCandidate.y.toInt() * width + rightX].toInt() and 0xFF) < avgThresh) {
-                rightX++
-            }
-            val refinedCx = (leftX + rightX) / 2f
+            val clusterToUse = if (bestCluster.isNotEmpty()) bestCluster else verifiedCandidates
+            val approxCx = clusterToUse.map { it.cx }.average().toFloat()
+            val approxCy = clusterToUse.map { it.cy }.average().toFloat()
+            val approxR = clusterToUse.map { it.radius }.average().toFloat()
 
-            var topY = bestCandidate.y.toInt()
-            while (topY > 1 && (gray[topY * width + refinedCx.toInt()].toInt() and 0xFF) < avgThresh) {
-                topY--
-            }
-            var bottomY = bestCandidate.y.toInt()
-            while (bottomY < height - 2 && (gray[bottomY * width + refinedCx.toInt()].toInt() and 0xFF) < avgThresh) {
-                bottomY++
-            }
-            val refinedCy = (topY + bottomY) / 2f
-
-            val refined = refineCircle(gray, width, height, refinedCx, refinedCy, bestCandidate.estimatedR)
-            return refined ?: CodeLocation(refinedCx, refinedCy, bestCandidate.estimatedR)
+            val refined = refineCircle(gray, width, height, approxCx, approxCy, approxR, contrast)
+            return refined ?: CodeLocation(approxCx, approxCy, approxR)
         }
 
-        val fallbackR = minOf(width, height) * 0.45f
-        return refineCircle(gray, width, height, width / 2f, height / 2f, fallbackR)
+        val fallbackR = minOf(width, height) * 0.38f
+        return refineCircle(gray, width, height, width / 2f, height / 2f, fallbackR, contrast)
             ?: CodeLocation(width / 2f, height / 2f, fallbackR)
     }
 
@@ -155,18 +206,20 @@ object ZCodeDetector {
         height: Int,
         approxCx: Float,
         approxCy: Float,
-        approxRadius: Float
+        approxRadius: Float,
+        contrast: Float = 60f
     ): CodeLocation? {
         val numRays = 36
         val edgePoints = mutableListOf<Float>()
+        val minGrad = maxOf(15f, contrast * 0.20f)
 
         for (k in 0 until numRays) {
             val angle = (k * 2f * PI.toFloat()) / numRays
             val cosA = cos(angle)
             val sinA = sin(angle)
 
-            val maxR = approxRadius * 1.25f
-            val minR = approxRadius * 0.80f
+            val maxR = minOf(minOf(width, height) * 0.49f, approxRadius * 1.25f)
+            val minR = approxRadius * 0.75f
 
             var r = maxR
             while (r >= minR) {
@@ -174,7 +227,7 @@ object ZCodeDetector {
                 val valOuter = sampleBilinear(gray, width, height, approxCx + (r + 2f) * cosA, approxCy + (r + 2f) * sinA)
                 val grad = valOuter - valInner
 
-                if (grad > 80f && valInner < 128f && valOuter > 128f) {
+                if (grad > minGrad) {
                     edgePoints.add(r)
                     break
                 }
@@ -182,7 +235,7 @@ object ZCodeDetector {
             }
         }
 
-        if (edgePoints.size >= 12) {
+        if (edgePoints.size >= 8) {
             val avgR = edgePoints.average().toFloat()
             return CodeLocation(approxCx, approxCy, avgR)
         }
@@ -198,14 +251,20 @@ object ZCodeDetector {
         radius: Float
     ): Float {
         val orientR = ZCodeGeometry.ORIENTATION_RADIUS * radius
+        val dotR = ZCodeGeometry.ORIENTATION_DOT_RADIUS * radius
         val numSamples = 360
         val sampledIntensities = FloatArray(numSamples)
 
         for (deg in 0 until numSamples) {
             val rad = (deg * PI.toFloat()) / 180f
-            val x = cx + orientR * cos(rad)
-            val y = cy + orientR * sin(rad)
-            sampledIntensities[deg] = 255f - sampleBilinear(gray, width, height, x, y)
+            val cosA = cos(rad)
+            val sinA = sin(rad)
+
+            val vCenter = 255f - sampleBilinear(gray, width, height, cx + orientR * cosA, cy + orientR * sinA)
+            val vInner = 255f - sampleBilinear(gray, width, height, cx + (orientR - dotR * 0.5f) * cosA, cy + (orientR - dotR * 0.5f) * sinA)
+            val vOuter = 255f - sampleBilinear(gray, width, height, cx + (orientR + dotR * 0.5f) * cosA, cy + (orientR + dotR * 0.5f) * sinA)
+
+            sampledIntensities[deg] = maxOf(vCenter, maxOf(vInner, vOuter))
         }
 
         var bestDeg = 0
@@ -221,7 +280,6 @@ object ZCodeDetector {
                 corr += sampledIntensities[sampleIdx] * weight
             }
 
-            // Directional key pip
             val keyRad = (shift * PI.toFloat()) / 180f
             val keyX = cx + (0.235f * radius) * cos(keyRad)
             val keyY = cy + (0.235f * radius) * sin(keyRad)
@@ -249,6 +307,10 @@ object ZCodeDetector {
         val bits = BooleanArray(ZCodeGeometry.TOTAL_BITS)
         var bitIdx = 0
 
+        val centerDark = 255f - sampleBilinear(gray, width, height, cx, cy)
+        val gapDark = 255f - sampleBilinear(gray, width, height, cx + radius * 0.11f, cy)
+        val refContrast = maxOf(20f, centerDark - gapDark)
+
         for (track in ZCodeGeometry.DATA_TRACKS) {
             val trackR = track.radius * radius
             val numSectors = track.numSectors
@@ -273,9 +335,17 @@ object ZCodeDetector {
                 if (avg > maxVal) maxVal = avg
             }
 
-            val threshold = minVal + (maxVal - minVal) * 0.45f
-            for (s in 0 until numSectors) {
-                bits[bitIdx++] = values[s] >= threshold
+            val trackContrast = maxVal - minVal
+            if (trackContrast < refContrast * 0.25f) {
+                val isAllDark = maxVal > (gapDark + refContrast * 0.55f)
+                for (s in 0 until numSectors) {
+                    bits[bitIdx++] = isAllDark
+                }
+            } else {
+                val threshold = minVal + trackContrast * 0.45f
+                for (s in 0 until numSectors) {
+                    bits[bitIdx++] = values[s] >= threshold
+                }
             }
         }
 

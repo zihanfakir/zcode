@@ -147,18 +147,18 @@ fun ScannerScreen() {
                                         val width = proxy.width
                                         val height = proxy.height
                                         val rowStride = plane.rowStride
-                                        val gray = ByteArray(width * height)
 
-                                        if (rowStride == width) {
-                                            buffer.get(gray)
-                                        } else {
-                                            for (row in 0 until height) {
-                                                buffer.position(row * rowStride)
-                                                buffer.get(gray, row * width, width)
-                                            }
+                                        val minDim = minOf(width, height)
+                                        val startX = (width - minDim) / 2
+                                        val startY = (height - minDim) / 2
+                                        val squareGray = ByteArray(minDim * minDim)
+
+                                        for (row in 0 until minDim) {
+                                            buffer.position((startY + row) * rowStride + startX)
+                                            buffer.get(squareGray, row * minDim, minDim)
                                         }
 
-                                        val res = decoder.decodeGrayscale(gray, width, height)
+                                        val res = decoder.decodeGrayscale(squareGray, minDim, minDim)
                                         if (res != null) {
                                             decodedResult = res
                                             if (res.payload.type == ZCodeDataType.URL && !res.payload.isLocked) {

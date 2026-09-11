@@ -60,6 +60,7 @@ export const ScannerPage: React.FC = () => {
   const [isSafeLinkOpen, setIsSafeLinkOpen] = useState(false);
 
   const [copied, setCopied] = useState(false);
+  const [scannedFlash, setScannedFlash] = useState(false);
   const [history, setHistory] = useState<HistoryItem[]>(() => {
     try {
       const saved = localStorage.getItem("zcode_scan_history");
@@ -134,6 +135,11 @@ export const ScannerPage: React.FC = () => {
             return result;
           });
           setDecodeError(null);
+          try {
+            navigator.vibrate?.(100);
+          } catch {}
+          setScannedFlash(true);
+          setTimeout(() => setScannedFlash(false), 800);
 
           if (!result.payload.isLocked) {
             addToHistory(result);
@@ -502,14 +508,30 @@ export const ScannerPage: React.FC = () => {
                   {cameraActive && (
                     <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
                       {/* Outer circular guide */}
-                      <div className="w-3/4 h-3/4 rounded-full border-2 border-dashed border-theme-primary/60 flex items-center justify-center relative">
+                      <div
+                        className={`w-3/4 h-3/4 rounded-full border-2 flex items-center justify-center relative transition-all duration-300 ${
+                          scannedFlash
+                            ? "border-emerald-400 shadow-[0_0_30px_rgba(52,211,153,0.7)] scale-105"
+                            : "border-dashed border-theme-primary/60"
+                        }`}
+                      >
                         {/* Center crosshair */}
-                        <div className="w-8 h-8 rounded-full border border-theme-primary/80 flex items-center justify-center">
-                          <div className="w-1.5 h-1.5 rounded-full bg-theme-primary"></div>
+                        <div
+                          className={`w-8 h-8 rounded-full border flex items-center justify-center transition-colors ${
+                            scannedFlash ? "border-emerald-400 bg-emerald-400/20" : "border-theme-primary/80"
+                          }`}
+                        >
+                          <div
+                            className={`w-1.5 h-1.5 rounded-full transition-colors ${
+                              scannedFlash ? "bg-emerald-400" : "bg-theme-primary"
+                            }`}
+                          ></div>
                         </div>
 
                         {/* Animated scanning line */}
-                        <div className="absolute left-4 right-4 h-0.5 bg-gradient-to-r from-transparent via-theme-primary to-transparent animate-scan-laser"></div>
+                        {!scannedFlash && (
+                          <div className="absolute left-4 right-4 h-0.5 bg-gradient-to-r from-transparent via-theme-primary to-transparent animate-scan-laser"></div>
+                        )}
                       </div>
                     </div>
                   )}

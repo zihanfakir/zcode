@@ -70,7 +70,7 @@ export const GeneratorPage: React.FC = () => {
   const [selectedPresetId, setSelectedPresetId] = useState("bw-classic");
 
   const [resolution, setResolution] = useState(1024);
-  const [showCenterZ, setShowCenterZ] = useState(true);
+  const [showCenterZ, setShowCenterZ] = useState(false);
   const [copied, setCopied] = useState(false);
   const [toastMsg, setToastMsg] = useState<string | null>(null);
 
