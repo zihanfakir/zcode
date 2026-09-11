@@ -86,6 +86,15 @@ export const HomePage: React.FC<HomePageProps> = ({ onNavigate }) => {
                   <Scan className="w-4 h-4" />
                   <span>Scan Z-Code</span>
                 </button>
+
+                <a
+                  href="https://github.com/zihanfakir/zcode/releases/latest"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="w-full sm:w-auto px-6 py-3.5 rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/30 text-emerald-300 font-semibold text-sm transition-all flex items-center justify-center gap-2 active:scale-95"
+                >
+                  <span>📱 Download APK</span>
+                </a>
               </div>
 
               {/* Key Spec Badges */}
