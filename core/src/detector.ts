@@ -174,7 +174,7 @@ export class ZCodeDetector {
     const numRays = 36;
     const edgePoints: Array<{ x: number; y: number }> = [];
     const maxR = minDim * 0.49;
-    const minR = minDim * 0.20;
+    const minR = Math.max(25, minDim * 0.08);
 
     for (let k = 0; k < numRays; k++) {
       const angle = (k * 2 * Math.PI) / numRays;
@@ -194,7 +194,7 @@ export class ZCodeDetector {
         const valOut = this.sampleBilinear(gray, width, height, xOut, yOut);
         const grad = valOut - valIn;
 
-        if (grad > 22) {
+        if (grad > 18) {
           edgePoints.push({
             x: seedX + r * cosA,
             y: seedY + r * sinA,
@@ -204,13 +204,13 @@ export class ZCodeDetector {
       }
     }
 
-    if (edgePoints.length < 18) return null;
+    if (edgePoints.length < 14) return null;
 
     const fitted = this.fitCircleKasa(edgePoints);
     if (!fitted) return null;
 
     const { cx, cy, radius } = fitted;
-    if (radius < minDim * 0.22 || radius > minDim * 0.52) return null;
+    if (radius < minDim * 0.08 || radius > minDim * 0.54) return null;
 
     // 3. Verify concentric bullseye pattern at detected center
     const coreLuma = this.sampleBilinear(gray, width, height, cx, cy);
@@ -228,7 +228,7 @@ export class ZCodeDetector {
       this.sampleBilinear(gray, width, height, cx, cy - radius * 0.17)
     ) / 4;
 
-    if (gapLuma - coreLuma < 10 || gapLuma - ringLuma < 8) {
+    if (gapLuma - coreLuma < 8 || gapLuma - ringLuma < 6) {
       return null;
     }
 
@@ -274,11 +274,11 @@ export class ZCodeDetector {
         if (runs[i].isDark && !runs[i + 1].isDark && runs[i + 2].isDark && !runs[i + 3].isDark && runs[i + 4].isDark) {
           const r0 = runs[i].length, r1 = runs[i + 1].length, r2 = runs[i + 2].length, r3 = runs[i + 3].length, r4 = runs[i + 4].length;
           const unit = (r0 + r1 + r3 + r4) / 4;
-          if (unit >= 1.2) {
+          if (unit >= 1.0) {
             const centerRatio = r2 / unit;
             if (centerRatio >= 1.1 && centerRatio <= 4.8) {
               const vertCy = runs[i + 2].startY + r2 / 2;
-              if (Math.abs(vertCy - approxY) <= Math.max(hDiskLen, r2) * 1.0) {
+              if (Math.abs(vertCy - approxY) <= Math.max(hDiskLen, r2) * 1.5) {
                 const estRadius = (r0 + r1 + r2 + r3 + r4) / 0.40;
                 return { cy: vertCy, radius: estRadius, vDiskLen: r2 };
               }
@@ -311,7 +311,7 @@ export class ZCodeDetector {
         if (runs[i].isDark && !runs[i + 1].isDark && runs[i + 2].isDark && !runs[i + 3].isDark && runs[i + 4].isDark) {
           const r0 = runs[i].length, r1 = runs[i + 1].length, r2 = runs[i + 2].length, r3 = runs[i + 3].length, r4 = runs[i + 4].length;
           const unit = (r0 + r1 + r3 + r4) / 4;
-          if (unit >= 1.2) {
+          if (unit >= 1.0) {
             const centerRatio = r2 / unit;
             const diff04 = Math.abs(r0 - r4) / Math.max(r0, r4);
             const diff13 = Math.abs(r1 - r3) / Math.max(r1, r3);
@@ -348,10 +348,11 @@ export class ZCodeDetector {
       const clusterToUse = bestCluster.length > 0 ? bestCluster : verifiedCandidates;
       const approxCx = clusterToUse.reduce((s, c) => s + c.cx, 0) / clusterToUse.length;
       const approxCy = clusterToUse.reduce((s, c) => s + c.cy, 0) / clusterToUse.length;
+      const approxR = clusterToUse.reduce((s, c) => s + c.radius, 0) / clusterToUse.length;
 
-      // Scan inward from outermost possible frame boundary towards center
-      const maxPossibleR = Math.min(approxCx - 4, approxCy - 4, width - approxCx - 4, height - approxCy - 4);
-      const minPossibleR = Math.max(25, Math.min(width, height) * 0.15);
+      // Scan inward around approxR (outer ring is at ~0.98 * approxR)
+      const maxPossibleR = Math.min(approxR * 1.30, approxCx - 4, approxCy - 4, width - approxCx - 4, height - approxCy - 4);
+      const minPossibleR = Math.max(15, approxR * 0.70);
 
       const numRays = 36;
       const edgePoints: Array<{ x: number; y: number }> = [];
@@ -373,16 +374,21 @@ export class ZCodeDetector {
           const valOut = this.sampleBilinear(gray, width, height, xOut, yOut);
           const grad = valOut - valIn;
 
-          if (grad > 20) {
+          if (grad > 18) {
             edgePoints.push({ x: approxCx + r * cosA, y: approxCy + r * sinA });
             break;
           }
         }
       }
 
-      if (edgePoints.length >= 14) {
+      if (edgePoints.length >= 10) {
         const refined = this.fitCircleKasa(edgePoints);
-        if (refined) return refined;
+        if (refined && refined.radius >= 20) return refined;
+      }
+
+      // Fallback directly to bullseye-estimated location if outer ring had partial occlusion
+      if (approxR >= 20) {
+        return { cx: approxCx, cy: approxCy, radius: approxR };
       }
     }
 

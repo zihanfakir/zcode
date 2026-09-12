@@ -32,8 +32,8 @@ class ZCodeDecoder {
         )
 
         // Multi-pass sub-degree offsets, radius scaling, and sub-pixel center jitter
-        val candidateOffsets = floatArrayOf(0f, 0.5f, -0.5f, 1.0f, -1.0f, 1.5f, -1.5f, 2.0f, -2.0f)
-        val candidateRadii = floatArrayOf(1.0f, 0.99f, 1.01f, 0.98f, 1.02f)
+        val candidateOffsets = floatArrayOf(0f, 0.5f, -0.5f, 1.0f, -1.0f, 1.5f, -1.5f, 2.0f, -2.0f, 2.5f, -2.5f)
+        val candidateRadii = floatArrayOf(1.0f, 0.99f, 1.01f, 0.98f, 1.02f, 0.97f, 1.03f)
         val centerJitters = arrayOf(
             Pair(0f, 0f),
             Pair(0.5f, 0f), Pair(-0.5f, 0f),

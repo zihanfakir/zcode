@@ -53,8 +53,8 @@ export class ZCodeDecoder {
     );
 
     // 3. Multi-pass sub-degree angle, radius scale, and sub-pixel center jitter
-    const candidateOffsets = [0, 0.5, -0.5, 1.0, -1.0, 1.5, -1.5, 2.0, -2.0];
-    const candidateRadii = [1.0, 0.99, 1.01, 0.98, 1.02];
+    const candidateOffsets = [0, 0.5, -0.5, 1.0, -1.0, 1.5, -1.5, 2.0, -2.0, 2.5, -2.5];
+    const candidateRadii = [1.0, 0.99, 1.01, 0.98, 1.02, 0.97, 1.03];
     const centerJitters = [
       { dx: 0, dy: 0 },
       { dx: 0.5, dy: 0 }, { dx: -0.5, dy: 0 },

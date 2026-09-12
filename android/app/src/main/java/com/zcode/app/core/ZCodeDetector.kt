@@ -171,7 +171,7 @@ object ZCodeDetector {
         val numRays = 36
         val edgePoints = mutableListOf<Point2D>()
         val maxR = minDim * 0.49f
-        val minR = minDim * 0.20f
+        val minR = maxOf(25f, minDim * 0.08f)
 
         for (k in 0 until numRays) {
             val angle = (k * 2f * PI.toFloat()) / numRays
@@ -191,7 +191,7 @@ object ZCodeDetector {
                     val valOut = sampleBilinear(gray, width, height, xOut, yOut)
                     val grad = valOut - valIn
 
-                    if (grad > 22f) {
+                    if (grad > 18f) {
                         edgePoints.add(Point2D(seedX + r * cosA, seedY + r * sinA))
                         break
                     }
@@ -200,11 +200,11 @@ object ZCodeDetector {
             }
         }
 
-        if (edgePoints.size < 18) return null
+        if (edgePoints.size < 14) return null
 
         val fitted = fitCircleKasa(edgePoints) ?: return null
         val (cx, cy, radius) = fitted
-        if (radius < minDim * 0.22f || radius > minDim * 0.52f) return null
+        if (radius < minDim * 0.08f || radius > minDim * 0.54f) return null
 
         val coreLuma = sampleBilinear(gray, width, height, cx, cy)
         val gapLuma = (
@@ -221,7 +221,7 @@ object ZCodeDetector {
             sampleBilinear(gray, width, height, cx, cy - radius * 0.17f)
         ) / 4f
 
-        if (gapLuma - coreLuma < 10f || gapLuma - ringLuma < 8f) {
+        if (gapLuma - coreLuma < 8f || gapLuma - ringLuma < 6f) {
             return null
         }
 
@@ -349,9 +349,10 @@ object ZCodeDetector {
             val clusterToUse = if (bestCluster.isNotEmpty()) bestCluster else verifiedCandidates
             val approxCx = clusterToUse.map { it.cx }.average().toFloat()
             val approxCy = clusterToUse.map { it.cy }.average().toFloat()
+            val approxR = clusterToUse.map { it.radius }.average().toFloat()
 
-            val maxPossibleR = minOf(approxCx - 4f, approxCy - 4f, width - approxCx - 4f, height - approxCy - 4f)
-            val minPossibleR = maxOf(25f, minOf(width, height) * 0.15f)
+            val maxPossibleR = minOf(approxR * 1.30f, approxCx - 4f, approxCy - 4f, width - approxCx - 4f, height - approxCy - 4f)
+            val minPossibleR = maxOf(15f, approxR * 0.70f)
 
             val numRays = 36
             val edgePoints = mutableListOf<Point2D>()
@@ -373,7 +374,7 @@ object ZCodeDetector {
                         val valOut = sampleBilinear(gray, width, height, xOut, yOut)
                         val grad = valOut - valIn
 
-                        if (grad > 20f) {
+                        if (grad > 18f) {
                             edgePoints.add(Point2D(approxCx + r * cosA, approxCy + r * sinA))
                             break
                         }
@@ -382,9 +383,13 @@ object ZCodeDetector {
                 }
             }
 
-            if (edgePoints.size >= 14) {
+            if (edgePoints.size >= 10) {
                 val refined = fitCircleKasa(edgePoints)
-                if (refined != null) return refined
+                if (refined != null && refined.radius >= 20f) return refined
+            }
+
+            if (approxR >= 20f) {
+                return CodeLocation(approxCx, approxCy, approxR)
             }
         }
 

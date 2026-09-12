@@ -43,6 +43,7 @@ export const ScannerPage: React.FC = () => {
   const [scanMode, setScanMode] = useState<"camera" | "upload">("camera");
   const [facingMode, setFacingMode] = useState<"environment" | "user">("environment");
   const [cameraActive, setCameraActive] = useState(false);
+  const [streamResolution, setStreamResolution] = useState<string | null>(null);
   const [cameraError, setCameraError] = useState<string | null>(null);
 
   const [decodedResult, setDecodedResult] = useState<ZCodeDecodedResult | null>(null);
@@ -277,6 +278,10 @@ export const ScannerPage: React.FC = () => {
       if (!videoRef.current || !canvasRef.current || videoRef.current.readyState < 2) return;
 
       const video = videoRef.current;
+      if (!streamResolution && video.videoWidth > 0 && video.videoHeight > 0) {
+        setStreamResolution(`${video.videoWidth}x${video.videoHeight}`);
+      }
+
       const canvas = canvasRef.current;
       const ctx = canvas.getContext("2d", { willReadFrequently: true });
       if (!ctx) return;
@@ -284,6 +289,7 @@ export const ScannerPage: React.FC = () => {
       isScanning = true;
       try {
         const minDim = Math.min(video.videoWidth, video.videoHeight);
+        if (minDim <= 0) return;
         const sx = (video.videoWidth - minDim) / 2;
         const sy = (video.videoHeight - minDim) / 2;
         // Optimal resolution for resolving small data dots on Track 9
@@ -302,7 +308,7 @@ export const ScannerPage: React.FC = () => {
       } finally {
         isScanning = false;
       }
-    }, 140);
+    }, 90);
 
     scanIntervalRef.current = interval;
     return () => clearInterval(interval);
@@ -553,9 +559,17 @@ export const ScannerPage: React.FC = () => {
                   )}
                 </div>
 
-                {/* Camera Controls */}
+                {/* Camera Controls & Resolution Badge */}
                 <div className="flex items-center justify-between text-xs text-theme-muted pt-1">
-                  <span>Align code inside circular reticle</span>
+                  <div className="flex items-center gap-2">
+                    <span className="inline-block w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                    <span>Align code in circle</span>
+                    {streamResolution && (
+                      <span className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-theme-card border border-theme-border text-theme-muted">
+                        {streamResolution}
+                      </span>
+                    )}
+                  </div>
                   <button
                     onClick={() =>
                       setFacingMode((prev) => (prev === "environment" ? "user" : "environment"))
