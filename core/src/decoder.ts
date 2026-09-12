@@ -33,27 +33,39 @@ export class ZCodeDecoder {
   }
 
   /**
-   * Decodes Z-Code from a grayscale luminance buffer.
+   * Decodes Z-Code from a grayscale luminance buffer with perspective tilt compensation.
    */
   public decodeGrayscale(gray: Uint8Array, width: number, height: number): ZCodeDecodedResult {
-    // 1. Locate center and radius of circular code
-    const location = ZCodeDetector.locateCode(gray, width, height);
+    // 1. Locate center and radius of circular code (with perspective tilt estimation)
+    const location = ZCodeDetector.locateCode(gray, width, height) as {
+      cx: number;
+      cy: number;
+      radius: number;
+      axisRatio?: number;
+      tiltAngle?: number;
+    } | null;
     if (!location) {
       throw new Error("Could not detect Z-Code circular boundary in image");
     }
 
-    // 2. Find orientation angle
+    const baseAxisRatio = location.axisRatio ?? 1.0;
+    const tiltAngle = location.tiltAngle ?? 0;
+
+    // 2. Find orientation angle under perspective tilt
     const rotation = ZCodeDetector.findOrientation(
       gray,
       width,
       height,
       location.cx,
       location.cy,
-      location.radius
+      location.radius,
+      baseAxisRatio,
+      tiltAngle
     );
 
-    // 3. Multi-pass sub-degree angle, radius scale, and sub-pixel center jitter
-    const candidateOffsets = [0, 0.5, -0.5, 1.0, -1.0, 1.5, -1.5, 2.0, -2.0, 2.5, -2.5];
+    // 3. Multi-pass sub-degree angle, radius scale, sub-pixel center jitter, and tilt ratio scale
+    const ratioScales = baseAxisRatio < 0.985 ? [1.0, 0.98, 1.02] : [1.0];
+    const candidateOffsets = [0, 0.5, -0.5, 1.0, -1.0, 1.5, -1.5, 2.0, -2.0];
     const candidateRadii = [1.0, 0.99, 1.01, 0.98, 1.02, 0.97, 1.03];
     const centerJitters = [
       { dx: 0, dy: 0 },
@@ -64,28 +76,34 @@ export class ZCodeDecoder {
     ];
     let lastError: Error | null = null;
 
-    for (const jitter of centerJitters) {
-      const curCx = location.cx + jitter.dx;
-      const curCy = location.cy + jitter.dy;
+    for (const rScale of ratioScales) {
+      const curAxisRatio = Math.max(0.50, Math.min(1.0, baseAxisRatio * rScale));
 
-      for (const radScale of candidateRadii) {
-        const curRadius = location.radius * radScale;
-        for (const degOffset of candidateOffsets) {
-          const angle = rotation + (degOffset * Math.PI) / 180;
-          const bits = ZCodeDetector.sampleBits(
-            gray,
-            width,
-            height,
-            curCx,
-            curCy,
-            curRadius,
-            angle
-          );
+      for (const jitter of centerJitters) {
+        const curCx = location.cx + jitter.dx;
+        const curCy = location.cy + jitter.dy;
 
-          try {
-            return this.decodeBits(bits, angle, { cx: curCx, cy: curCy, radius: curRadius });
-          } catch (err) {
-            lastError = err as Error;
+        for (const radScale of candidateRadii) {
+          const curRadius = location.radius * radScale;
+          for (const degOffset of candidateOffsets) {
+            const angle = rotation + (degOffset * Math.PI) / 180;
+            const bits = ZCodeDetector.sampleBits(
+              gray,
+              width,
+              height,
+              curCx,
+              curCy,
+              curRadius,
+              angle,
+              curAxisRatio,
+              tiltAngle
+            );
+
+            try {
+              return this.decodeBits(bits, angle, { cx: curCx, cy: curCy, radius: curRadius });
+            } catch (err) {
+              lastError = err as Error;
+            }
           }
         }
       }

@@ -22,17 +22,23 @@ class ZCodeDecoder {
         val location = ZCodeDetector.locateCode(gray, width, height)
             ?: throw IllegalStateException("Could not detect Z-Code circular boundary in image")
 
+        val baseAxisRatio = location.axisRatio
+        val tiltAngle = location.tiltAngle
+
         val rotation = ZCodeDetector.findOrientation(
             gray,
             width,
             height,
             location.cx,
             location.cy,
-            location.radius
+            location.radius,
+            baseAxisRatio,
+            tiltAngle
         )
 
-        // Multi-pass sub-degree offsets, radius scaling, and sub-pixel center jitter
-        val candidateOffsets = floatArrayOf(0f, 0.5f, -0.5f, 1.0f, -1.0f, 1.5f, -1.5f, 2.0f, -2.0f, 2.5f, -2.5f)
+        // Multi-pass tilt ratio scales, sub-pixel center jitter, radius scaling, and sub-degree offsets
+        val ratioScales = if (baseAxisRatio < 0.985f) floatArrayOf(1.0f, 0.98f, 1.02f) else floatArrayOf(1.0f)
+        val candidateOffsets = floatArrayOf(0f, 0.5f, -0.5f, 1.0f, -1.0f, 1.5f, -1.5f, 2.0f, -2.0f)
         val candidateRadii = floatArrayOf(1.0f, 0.99f, 1.01f, 0.98f, 1.02f, 0.97f, 1.03f)
         val centerJitters = arrayOf(
             Pair(0f, 0f),
@@ -43,28 +49,34 @@ class ZCodeDecoder {
         )
         var lastError: Exception? = null
 
-        for (jitter in centerJitters) {
-            val curCx = location.cx + jitter.first
-            val curCy = location.cy + jitter.second
+        for (rScale in ratioScales) {
+            val curAxisRatio = (baseAxisRatio * rScale).coerceIn(0.50f, 1.0f)
 
-            for (radScale in candidateRadii) {
-                val curRadius = location.radius * radScale
-                for (degOffset in candidateOffsets) {
-                    val angle = rotation + (degOffset * PI.toFloat()) / 180f
-                    val bits = ZCodeDetector.sampleBits(
-                        gray,
-                        width,
-                        height,
-                        curCx,
-                        curCy,
-                        curRadius,
-                        angle
-                    )
+            for (jitter in centerJitters) {
+                val curCx = location.cx + jitter.first
+                val curCy = location.cy + jitter.second
 
-                    try {
-                        return decodeBits(bits, angle, location.copy(cx = curCx, cy = curCy, radius = curRadius))
-                    } catch (e: Exception) {
-                        lastError = e
+                for (radScale in candidateRadii) {
+                    val curRadius = location.radius * radScale
+                    for (degOffset in candidateOffsets) {
+                        val angle = rotation + (degOffset * PI.toFloat()) / 180f
+                        val bits = ZCodeDetector.sampleBits(
+                            gray,
+                            width,
+                            height,
+                            curCx,
+                            curCy,
+                            curRadius,
+                            angle,
+                            curAxisRatio,
+                            tiltAngle
+                        )
+
+                        try {
+                            return decodeBits(bits, angle, location.copy(cx = curCx, cy = curCy, radius = curRadius, axisRatio = curAxisRatio))
+                        } catch (e: Exception) {
+                            lastError = e
+                        }
                     }
                 }
             }

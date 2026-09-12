@@ -1,9 +1,14 @@
 import { ZCodeGeometry } from "./geometry.js";
 
-export interface DetectionResult {
+export interface CodeLocation {
   cx: number;
   cy: number;
   radius: number;
+  axisRatio?: number;
+  tiltAngle?: number;
+}
+
+export interface DetectionResult extends CodeLocation {
   rotation: number; // Angle in radians
   confidence: number;
 }
@@ -95,7 +100,7 @@ export class ZCodeDetector {
   /**
    * Kasa Algebraic Least-Squares Circle Fit. Fits (x_i, y_i) to (x - cx)^2 + (y - cy)^2 = R^2.
    */
-  public static fitCircleKasa(points: Array<{ x: number; y: number }>): { cx: number; cy: number; radius: number } | null {
+  public static fitCircleKasa(points: Array<{ x: number; y: number }>): CodeLocation | null {
     const n = points.length;
     if (n < 6) return null;
 
@@ -136,7 +141,56 @@ export class ZCodeDetector {
     const rSq = C + cx * cx + cy * cy;
     if (rSq <= 0) return null;
 
-    return { cx, cy, radius: Math.sqrt(rSq) };
+    // 2nd Harmonic Fourier decomposition to measure perspective tilt (ellipse a, b, phi)
+    let sumR = 0, sumC = 0, sumS = 0;
+    for (let i = 0; i < n; i++) {
+      const dx = points[i].x - cx;
+      const dy = points[i].y - cy;
+      const r = Math.hypot(dx, dy);
+      const th = Math.atan2(dy, dx);
+      sumR += r;
+      sumC += r * Math.cos(2 * th);
+      sumS += r * Math.sin(2 * th);
+    }
+    const R0 = sumR / n;
+    const c2 = (2 * sumC) / n;
+    const s2 = (2 * sumS) / n;
+    const amp = Math.hypot(c2, s2);
+    const phi = Math.atan2(s2, c2) / 2;
+    const majorA = R0 + amp;
+    const minorB = Math.max(5, R0 - amp);
+    const axisRatio = Math.max(0.60, Math.min(1.0, minorB / majorA));
+
+    return { cx, cy, radius: majorA, axisRatio, tiltAngle: phi };
+  }
+
+  /**
+   * Projects a circle coordinate (radius r, polar angle theta) to camera image (x, y)
+   * under perspective tilt (axisRatio b/a, tiltAngle phi).
+   */
+  public static getAffinePoint(
+    cx: number,
+    cy: number,
+    r: number,
+    theta: number,
+    axisRatio: number = 1.0,
+    tiltAngle: number = 0
+  ): { x: number; y: number } {
+    if (axisRatio >= 0.985) {
+      return {
+        x: cx + r * Math.cos(theta),
+        y: cy + r * Math.sin(theta),
+      };
+    }
+    const psi = theta - tiltAngle;
+    const dxPrime = r * Math.cos(psi);
+    const dyPrime = axisRatio * r * Math.sin(psi);
+    const cosPhi = Math.cos(tiltAngle);
+    const sinPhi = Math.sin(tiltAngle);
+    return {
+      x: cx + dxPrime * cosPhi - dyPrime * sinPhi,
+      y: cy + dxPrime * sinPhi + dyPrime * cosPhi,
+    };
   }
 
   /**
@@ -147,21 +201,23 @@ export class ZCodeDetector {
     gray: Uint8Array,
     width: number,
     height: number
-  ): { cx: number; cy: number; radius: number } | null {
+  ): CodeLocation | null {
     const midX = Math.floor(width / 2);
     const midY = Math.floor(height / 2);
     const minDim = Math.min(width, height);
     const searchWin = Math.floor(minDim * 0.08);
 
-    // 1. Locate dark core of central bullseye near center
+    // 1. Locate dark core of central bullseye near center (weighted by proximity to center)
     let seedX = midX;
     let seedY = midY;
-    let minLuma = 255;
+    let bestScore = -Infinity;
     for (let dy = -searchWin; dy <= searchWin; dy += 3) {
       for (let dx = -searchWin; dx <= searchWin; dx += 3) {
         const lum = gray[(midY + dy) * width + (midX + dx)];
-        if (lum < minLuma) {
-          minLuma = lum;
+        const dist = Math.hypot(dx, dy);
+        const score = (255 - lum) - dist * 2.5;
+        if (score > bestScore) {
+          bestScore = score;
           seedX = midX + dx;
           seedY = midY + dy;
         }
@@ -238,7 +294,7 @@ export class ZCodeDetector {
   /**
    * Stage 2: Robust Full-Image Adaptive Scanline Finder Search.
    */
-  public static locateCode(gray: Uint8Array, width: number, height: number): { cx: number; cy: number; radius: number } | null {
+  public static locateCode(gray: Uint8Array, width: number, height: number): CodeLocation | null {
     // 1. Stage 1: Try Reticle-Guided Fast Path first (Instant Lock < 1.5ms)
     const fastResult = this.detectReticleGuided(gray, width, height);
     if (fastResult) {
@@ -397,7 +453,7 @@ export class ZCodeDetector {
 
   /**
    * Finds rotation angle using Zero-Mean Normalized Cross-Correlation (ZNCC)
-   * around the orientation track with plateau midpoint resolution.
+   * around the orientation track with plateau midpoint resolution and perspective tilt compensation.
    */
   public static findOrientation(
     gray: Uint8Array,
@@ -405,7 +461,9 @@ export class ZCodeDetector {
     height: number,
     cx: number,
     cy: number,
-    radius: number
+    radius: number,
+    axisRatio: number = 1.0,
+    tiltAngle: number = 0
   ): number {
     const orientRadius = ZCodeGeometry.ORIENTATION_RADIUS * radius;
     const dotR = ZCodeGeometry.ORIENTATION_DOT_RADIUS * radius;
@@ -415,12 +473,13 @@ export class ZCodeDetector {
     let meanIntensity = 0;
     for (let deg = 0; deg < numSamples; deg++) {
       const rad = (deg * Math.PI) / 180;
-      const cosA = Math.cos(rad);
-      const sinA = Math.sin(rad);
+      const ptCenter = this.getAffinePoint(cx, cy, orientRadius, rad, axisRatio, tiltAngle);
+      const ptInner = this.getAffinePoint(cx, cy, orientRadius - dotR * 0.5, rad, axisRatio, tiltAngle);
+      const ptOuter = this.getAffinePoint(cx, cy, orientRadius + dotR * 0.5, rad, axisRatio, tiltAngle);
 
-      const vCenter = 255 - this.sampleBilinear(gray, width, height, cx + orientRadius * cosA, cy + orientRadius * sinA);
-      const vInner = 255 - this.sampleBilinear(gray, width, height, cx + (orientRadius - dotR * 0.5) * cosA, cy + (orientRadius - dotR * 0.5) * sinA);
-      const vOuter = 255 - this.sampleBilinear(gray, width, height, cx + (orientRadius + dotR * 0.5) * cosA, cy + (orientRadius + dotR * 0.5) * sinA);
+      const vCenter = 255 - this.sampleBilinear(gray, width, height, ptCenter.x, ptCenter.y);
+      const vInner = 255 - this.sampleBilinear(gray, width, height, ptInner.x, ptInner.y);
+      const vOuter = 255 - this.sampleBilinear(gray, width, height, ptOuter.x, ptOuter.y);
 
       const val = Math.max(vCenter, vInner, vOuter);
       sampledIntensities[deg] = val;
@@ -447,9 +506,8 @@ export class ZCodeDetector {
       }
 
       const keyRad = (shift * Math.PI) / 180;
-      const keyX = cx + (0.235 * radius) * Math.cos(keyRad);
-      const keyY = cy + (0.235 * radius) * Math.sin(keyRad);
-      const keyVal = (255 - this.sampleBilinear(gray, width, height, keyX, keyY)) - meanIntensity;
+      const keyPt = this.getAffinePoint(cx, cy, 0.235 * radius, keyRad, axisRatio, tiltAngle);
+      const keyVal = (255 - this.sampleBilinear(gray, width, height, keyPt.x, keyPt.y)) - meanIntensity;
       corr += keyVal * 1.5;
 
       scores[shift] = corr;
@@ -476,8 +534,8 @@ export class ZCodeDetector {
   }
 
   /**
-   * Samples bits using Local Radial Differential Sampling (Dot vs. Inter-track Gaps).
-   * Completely immune to lighting gradients, shadows, and screen reflections!
+   * Samples bits using Local Radial Differential Sampling (Dot vs. Inter-track Gaps)
+   * with full affine perspective tilt compensation.
    */
   public static sampleBits(
     gray: Uint8Array,
@@ -486,14 +544,17 @@ export class ZCodeDetector {
     cx: number,
     cy: number,
     radius: number,
-    rotationAngle: number
+    rotationAngle: number,
+    axisRatio: number = 1.0,
+    tiltAngle: number = 0
   ): boolean[] {
     const bits: boolean[] = [];
     const gapOffset = 0.030 * radius;
 
     // Reference black and white levels from bullseye
     const centerDark = 255 - this.sampleBilinear(gray, width, height, cx, cy);
-    const gapDark = 255 - this.sampleBilinear(gray, width, height, cx + radius * 0.11, cy);
+    const gapPt = this.getAffinePoint(cx, cy, radius * 0.11, 0, axisRatio, tiltAngle);
+    const gapDark = 255 - this.sampleBilinear(gray, width, height, gapPt.x, gapPt.y);
     const refContrast = Math.max(15, centerDark - gapDark);
 
     for (const track of ZCodeGeometry.DATA_TRACKS) {
@@ -504,12 +565,14 @@ export class ZCodeDetector {
       let meanContrast = 0;
       for (let s = 0; s < numSectors; s++) {
         const angle = rotationAngle + (s / numSectors) * 2 * Math.PI;
-        const cosA = Math.cos(angle);
-        const sinA = Math.sin(angle);
 
-        const valCenter = this.sampleBilinear(gray, width, height, cx + trackRadius * cosA, cy + trackRadius * sinA);
-        const valInnerGap = this.sampleBilinear(gray, width, height, cx + (trackRadius - gapOffset) * cosA, cy + (trackRadius - gapOffset) * sinA);
-        const valOuterGap = this.sampleBilinear(gray, width, height, cx + (trackRadius + gapOffset) * cosA, cy + (trackRadius + gapOffset) * sinA);
+        const ptCenter = this.getAffinePoint(cx, cy, trackRadius, angle, axisRatio, tiltAngle);
+        const ptInnerGap = this.getAffinePoint(cx, cy, trackRadius - gapOffset, angle, axisRatio, tiltAngle);
+        const ptOuterGap = this.getAffinePoint(cx, cy, trackRadius + gapOffset, angle, axisRatio, tiltAngle);
+
+        const valCenter = this.sampleBilinear(gray, width, height, ptCenter.x, ptCenter.y);
+        const valInnerGap = this.sampleBilinear(gray, width, height, ptInnerGap.x, ptInnerGap.y);
+        const valOuterGap = this.sampleBilinear(gray, width, height, ptOuterGap.x, ptOuterGap.y);
         const valBg = (valInnerGap + valOuterGap) / 2;
 
         const contrast = valBg - valCenter;

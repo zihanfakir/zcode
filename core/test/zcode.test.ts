@@ -169,12 +169,7 @@ test("Optical Scan Round-Trip: 'Hello Zihan' at 0 deg rotation", () => {
   const encoded = encoder.encode(text);
   const image = ZCodeRenderer.renderToImageBuffer(encoded, { size: 512, rotationAngle: 0 });
 
-  const gray = ZCodeDetector.toGrayscale(image);
-  const loc = ZCodeDetector.locateCode(gray, image.width, image.height);
-  if (loc) {
-    const rot = ZCodeDetector.findOrientation(gray, image.width, image.height, loc.cx, loc.cy, loc.radius);
-    console.log("DETECTION DEBUG:", { loc, rotDeg: (rot * 180) / Math.PI });
-  }
+
 
   const result = decoder.decodeImage(image);
   assert.equal(result.payload.type, ZCodeDataType.TEXT);

@@ -13,7 +13,9 @@ data class Point2D(val x: Float, val y: Float)
 data class CodeLocation(
     val cx: Float,
     val cy: Float,
-    val radius: Float
+    val radius: Float,
+    val axisRatio: Float = 1.0f,
+    val tiltAngle: Float = 0f
 )
 
 object ZCodeDetector {
@@ -51,33 +53,35 @@ object ZCodeDetector {
         val p01 = (gray[(iy + 1) * width + ix].toInt() and 0xFF).toFloat()
         val p11 = (gray[(iy + 1) * width + ix + 1].toInt() and 0xFF).toFloat()
 
-        return (1f - dx) * (1f - dy) * p00 +
+        return ((1f - dx) * (1f - dy) * p00 +
                 dx * (1f - dy) * p10 +
                 (1f - dx) * dy * p01 +
-                dx * dy * p11
+                dx * dy * p11)
     }
 
     fun computeIntegralImage(gray: ByteArray, width: Int, height: Int): IntArray {
+        val stride = width + 1
         val integral = IntArray((width + 1) * (height + 1))
+
         for (y in 0 until height) {
             var rowSum = 0
-            val grayRowOffset = y * width
-            val intRowOffset = (y + 1) * (width + 1)
-            val prevIntRowOffset = y * (width + 1)
+            val srcRowOffset = y * width
+            val dstRowOffset = (y + 1) * stride + 1
+
             for (x in 0 until width) {
-                rowSum += gray[grayRowOffset + x].toInt() and 0xFF
-                integral[intRowOffset + (x + 1)] = integral[prevIntRowOffset + (x + 1)] + rowSum
+                rowSum += gray[srcRowOffset + x].toInt() and 0xFF
+                integral[dstRowOffset + x] = integral[dstRowOffset - stride + x] + rowSum
             }
         }
         return integral
     }
 
-    fun getLocalMean(integral: IntArray, width: Int, height: Int, x: Int, y: Int, w: Int): Float {
-        val x1 = maxOf(0, x - w)
-        val y1 = maxOf(0, y - w)
-        val x2 = minOf(width, x + w + 1)
-        val y2 = minOf(height, y + w + 1)
+    fun getLocalMean(integral: IntArray, width: Int, height: Int, x: Int, y: Int, winSize: Int): Float {
         val stride = width + 1
+        val x1 = maxOf(0, x - winSize)
+        val y1 = maxOf(0, y - winSize)
+        val x2 = minOf(width, x + winSize + 1)
+        val y2 = minOf(height, y + winSize + 1)
 
         val sum = integral[y2 * stride + x2] - integral[y1 * stride + x2] - integral[y2 * stride + x1] + integral[y1 * stride + x1]
         val area = (x2 - x1) * (y2 - y1)
@@ -137,7 +141,50 @@ object ZCodeDetector {
         val rSq = C + (cx.toDouble() * cx.toDouble()) + (cy.toDouble() * cy.toDouble())
         if (rSq <= 0.0) return null
 
-        return CodeLocation(cx, cy, sqrt(rSq).toFloat())
+        var sumR = 0.0
+        var sumC = 0.0
+        var sumS = 0.0
+        for (p in points) {
+            val dx = (p.x - cx).toDouble()
+            val dy = (p.y - cy).toDouble()
+            val r = hypot(dx, dy)
+            val th = atan2(dy, dx)
+            sumR += r
+            sumC += r * cos(2.0 * th)
+            sumS += r * sin(2.0 * th)
+        }
+        val R0 = sumR / n
+        val c2 = (2.0 * sumC) / n
+        val s2 = (2.0 * sumS) / n
+        val amp = hypot(c2, s2)
+        val phi = (atan2(s2, c2) / 2.0).toFloat()
+        val majorA = (R0 + amp).toFloat()
+        val minorB = maxOf(5.0, R0 - amp).toFloat()
+        val axisRatio = (minorB / majorA).coerceIn(0.60f, 1.0f)
+
+        return CodeLocation(cx, cy, majorA, axisRatio, phi)
+    }
+
+    fun getAffinePoint(
+        cx: Float,
+        cy: Float,
+        r: Float,
+        theta: Float,
+        axisRatio: Float = 1.0f,
+        tiltAngle: Float = 0f
+    ): Point2D {
+        if (axisRatio >= 0.985f) {
+            return Point2D(cx + r * cos(theta), cy + r * sin(theta))
+        }
+        val psi = theta - tiltAngle
+        val dxPrime = r * cos(psi)
+        val dyPrime = axisRatio * r * sin(psi)
+        val cosPhi = cos(tiltAngle)
+        val sinPhi = sin(tiltAngle)
+        return Point2D(
+            cx + dxPrime * cosPhi - dyPrime * sinPhi,
+            cy + dxPrime * sinPhi + dyPrime * cosPhi
+        )
     }
 
     /**
@@ -152,14 +199,16 @@ object ZCodeDetector {
 
         var seedX = midX
         var seedY = midY
-        var minLuma = 255
+        var bestScore = Float.NEGATIVE_INFINITY
         var dy = -searchWin
         while (dy <= searchWin) {
             var dx = -searchWin
             while (dx <= searchWin) {
                 val lum = gray[(midY + dy) * width + (midX + dx)].toInt() and 0xFF
-                if (lum < minLuma) {
-                    minLuma = lum
+                val dist = hypot(dx.toDouble(), dy.toDouble()).toFloat()
+                val score = (255f - lum) - dist * 2.5f
+                if (score > bestScore) {
+                    bestScore = score
                     seedX = midX + dx
                     seedY = midY + dy
                 }
@@ -406,7 +455,9 @@ object ZCodeDetector {
         height: Int,
         cx: Float,
         cy: Float,
-        radius: Float
+        radius: Float,
+        axisRatio: Float = 1.0f,
+        tiltAngle: Float = 0f
     ): Float {
         val orientR = ZCodeGeometry.ORIENTATION_RADIUS * radius
         val dotR = ZCodeGeometry.ORIENTATION_DOT_RADIUS * radius
@@ -416,12 +467,14 @@ object ZCodeDetector {
         var meanIntensity = 0f
         for (deg in 0 until numSamples) {
             val rad = (deg * PI.toFloat()) / 180f
-            val cosA = cos(rad)
-            val sinA = sin(rad)
 
-            val vCenter = 255f - sampleBilinear(gray, width, height, cx + orientR * cosA, cy + orientR * sinA)
-            val vInner = 255f - sampleBilinear(gray, width, height, cx + (orientR - dotR * 0.5f) * cosA, cy + (orientR - dotR * 0.5f) * sinA)
-            val vOuter = 255f - sampleBilinear(gray, width, height, cx + (orientR + dotR * 0.5f) * cosA, cy + (orientR + dotR * 0.5f) * sinA)
+            val ptCenter = getAffinePoint(cx, cy, orientR, rad, axisRatio, tiltAngle)
+            val ptInner = getAffinePoint(cx, cy, orientR - dotR * 0.5f, rad, axisRatio, tiltAngle)
+            val ptOuter = getAffinePoint(cx, cy, orientR + dotR * 0.5f, rad, axisRatio, tiltAngle)
+
+            val vCenter = 255f - sampleBilinear(gray, width, height, ptCenter.x, ptCenter.y)
+            val vInner = 255f - sampleBilinear(gray, width, height, ptInner.x, ptInner.y)
+            val vOuter = 255f - sampleBilinear(gray, width, height, ptOuter.x, ptOuter.y)
 
             val v = maxOf(vCenter, maxOf(vInner, vOuter))
             sampledIntensities[deg] = v
@@ -448,9 +501,8 @@ object ZCodeDetector {
             }
 
             val keyRad = (shift * PI.toFloat()) / 180f
-            val keyX = cx + (0.235f * radius) * cos(keyRad)
-            val keyY = cy + (0.235f * radius) * sin(keyRad)
-            val keyVal = (255f - sampleBilinear(gray, width, height, keyX, keyY)) - meanIntensity
+            val keyPt = getAffinePoint(cx, cy, 0.235f * radius, keyRad, axisRatio, tiltAngle)
+            val keyVal = (255f - sampleBilinear(gray, width, height, keyPt.x, keyPt.y)) - meanIntensity
             corr += keyVal * 1.5f
 
             scores[shift] = corr
@@ -485,14 +537,18 @@ object ZCodeDetector {
         cx: Float,
         cy: Float,
         radius: Float,
-        rotation: Float
+        rotation: Float,
+        axisRatio: Float = 1.0f,
+        tiltAngle: Float = 0f
     ): BooleanArray {
         val bits = BooleanArray(ZCodeGeometry.TOTAL_BITS)
         var bitIdx = 0
         val gapOffset = 0.030f * radius
 
-        val centerDark = 255f - sampleBilinear(gray, width, height, cx, cy)
-        val gapDark = 255f - sampleBilinear(gray, width, height, cx + radius * 0.11f, cy)
+        val ptCenterRef = getAffinePoint(cx, cy, 0f, 0f, axisRatio, tiltAngle)
+        val ptGapRef = getAffinePoint(cx, cy, radius * 0.11f, 0f, axisRatio, tiltAngle)
+        val centerDark = 255f - sampleBilinear(gray, width, height, ptCenterRef.x, ptCenterRef.y)
+        val gapDark = 255f - sampleBilinear(gray, width, height, ptGapRef.x, ptGapRef.y)
         val refContrast = maxOf(15f, centerDark - gapDark)
 
         for (track in ZCodeGeometry.DATA_TRACKS) {
@@ -503,12 +559,14 @@ object ZCodeDetector {
             var meanContrast = 0f
             for (s in 0 until numSectors) {
                 val angle = rotation + (s.toFloat() / numSectors) * 2f * PI.toFloat()
-                val cosA = cos(angle)
-                val sinA = sin(angle)
 
-                val valCenter = sampleBilinear(gray, width, height, cx + trackR * cosA, cy + trackR * sinA)
-                val valInnerGap = sampleBilinear(gray, width, height, cx + (trackR - gapOffset) * cosA, cy + (trackR - gapOffset) * sinA)
-                val valOuterGap = sampleBilinear(gray, width, height, cx + (trackR + gapOffset) * cosA, cy + (trackR + gapOffset) * sinA)
+                val ptCenter = getAffinePoint(cx, cy, trackR, angle, axisRatio, tiltAngle)
+                val ptInner = getAffinePoint(cx, cy, trackR - gapOffset, angle, axisRatio, tiltAngle)
+                val ptOuter = getAffinePoint(cx, cy, trackR + gapOffset, angle, axisRatio, tiltAngle)
+
+                val valCenter = sampleBilinear(gray, width, height, ptCenter.x, ptCenter.y)
+                val valInnerGap = sampleBilinear(gray, width, height, ptInner.x, ptInner.y)
+                val valOuterGap = sampleBilinear(gray, width, height, ptOuter.x, ptOuter.y)
                 val valBg = (valInnerGap + valOuterGap) / 2f
 
                 val contrast = valBg - valCenter
