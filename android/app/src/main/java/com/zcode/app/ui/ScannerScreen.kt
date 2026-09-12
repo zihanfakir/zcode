@@ -61,6 +61,13 @@ fun ScannerScreen() {
     var showSafeLinkDialog by remember { mutableStateOf(false) }
 
     val decoder = remember { ZCodeDecoder() }
+    val cameraExecutor = remember { Executors.newSingleThreadExecutor() }
+
+    DisposableEffect(Unit) {
+        onDispose {
+            cameraExecutor.shutdown()
+        }
+    }
 
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -132,9 +139,9 @@ fun ScannerScreen() {
 
                             val imageAnalysis = ImageAnalysis.Builder()
                                 .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+                                .setTargetResolution(android.util.Size(1080, 1920))
                                 .build()
 
-                            val cameraExecutor = Executors.newSingleThreadExecutor()
                             imageAnalysis.setAnalyzer(cameraExecutor) { imageProxy ->
                                 imageProxy.use { proxy ->
                                     if (decodedResult != null && (decodedResult!!.payload.isLocked || showSafeLinkDialog)) {
@@ -143,7 +150,8 @@ fun ScannerScreen() {
 
                                     try {
                                         val plane = proxy.planes[0]
-                                        val buffer = plane.buffer
+                                        val buffer = plane.buffer.duplicate()
+                                        buffer.rewind()
                                         val width = proxy.width
                                         val height = proxy.height
                                         val rowStride = plane.rowStride
@@ -160,9 +168,11 @@ fun ScannerScreen() {
 
                                         val res = decoder.decodeGrayscale(squareGray, minDim, minDim)
                                         if (res != null) {
-                                            decodedResult = res
-                                            if (res.payload.type == ZCodeDataType.URL && !res.payload.isLocked) {
-                                                showSafeLinkDialog = true
+                                            android.os.Handler(android.os.Looper.getMainLooper()).post {
+                                                decodedResult = res
+                                                if (res.payload.type == ZCodeDataType.URL && !res.payload.isLocked) {
+                                                    showSafeLinkDialog = true
+                                                }
                                             }
                                         }
                                     } catch (_: Exception) {

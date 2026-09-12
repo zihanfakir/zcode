@@ -52,29 +52,41 @@ export class ZCodeDecoder {
       location.radius
     );
 
-    // 3. Multi-pass sub-degree angle and radius sampling
+    // 3. Multi-pass sub-degree angle, radius scale, and sub-pixel center jitter
     const candidateOffsets = [0, 0.5, -0.5, 1.0, -1.0, 1.5, -1.5, 2.0, -2.0];
     const candidateRadii = [1.0, 0.99, 1.01, 0.98, 1.02];
+    const centerJitters = [
+      { dx: 0, dy: 0 },
+      { dx: 0.5, dy: 0 }, { dx: -0.5, dy: 0 },
+      { dx: 0, dy: 0.5 }, { dx: 0, dy: -0.5 },
+      { dx: 1.0, dy: 0 }, { dx: -1.0, dy: 0 },
+      { dx: 0, dy: 1.0 }, { dx: 0, dy: -1.0 },
+    ];
     let lastError: Error | null = null;
 
-    for (const radScale of candidateRadii) {
-      const curRadius = location.radius * radScale;
-      for (const degOffset of candidateOffsets) {
-        const angle = rotation + (degOffset * Math.PI) / 180;
-        const bits = ZCodeDetector.sampleBits(
-          gray,
-          width,
-          height,
-          location.cx,
-          location.cy,
-          curRadius,
-          angle
-        );
+    for (const jitter of centerJitters) {
+      const curCx = location.cx + jitter.dx;
+      const curCy = location.cy + jitter.dy;
 
-        try {
-          return this.decodeBits(bits, angle, { ...location, radius: curRadius });
-        } catch (err) {
-          lastError = err as Error;
+      for (const radScale of candidateRadii) {
+        const curRadius = location.radius * radScale;
+        for (const degOffset of candidateOffsets) {
+          const angle = rotation + (degOffset * Math.PI) / 180;
+          const bits = ZCodeDetector.sampleBits(
+            gray,
+            width,
+            height,
+            curCx,
+            curCy,
+            curRadius,
+            angle
+          );
+
+          try {
+            return this.decodeBits(bits, angle, { cx: curCx, cy: curCy, radius: curRadius });
+          } catch (err) {
+            lastError = err as Error;
+          }
         }
       }
     }

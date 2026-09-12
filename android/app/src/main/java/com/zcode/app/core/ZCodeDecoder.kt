@@ -31,29 +31,41 @@ class ZCodeDecoder {
             location.radius
         )
 
-        // Multi-pass sub-degree offsets and radius scaling
+        // Multi-pass sub-degree offsets, radius scaling, and sub-pixel center jitter
         val candidateOffsets = floatArrayOf(0f, 0.5f, -0.5f, 1.0f, -1.0f, 1.5f, -1.5f, 2.0f, -2.0f)
         val candidateRadii = floatArrayOf(1.0f, 0.99f, 1.01f, 0.98f, 1.02f)
+        val centerJitters = arrayOf(
+            Pair(0f, 0f),
+            Pair(0.5f, 0f), Pair(-0.5f, 0f),
+            Pair(0f, 0.5f), Pair(0f, -0.5f),
+            Pair(1.0f, 0f), Pair(-1.0f, 0f),
+            Pair(0f, 1.0f), Pair(0f, -1.0f)
+        )
         var lastError: Exception? = null
 
-        for (radScale in candidateRadii) {
-            val curRadius = location.radius * radScale
-            for (degOffset in candidateOffsets) {
-                val angle = rotation + (degOffset * PI.toFloat()) / 180f
-                val bits = ZCodeDetector.sampleBits(
-                    gray,
-                    width,
-                    height,
-                    location.cx,
-                    location.cy,
-                    curRadius,
-                    angle
-                )
+        for (jitter in centerJitters) {
+            val curCx = location.cx + jitter.first
+            val curCy = location.cy + jitter.second
 
-                try {
-                    return decodeBits(bits, angle, location.copy(radius = curRadius))
-                } catch (e: Exception) {
-                    lastError = e
+            for (radScale in candidateRadii) {
+                val curRadius = location.radius * radScale
+                for (degOffset in candidateOffsets) {
+                    val angle = rotation + (degOffset * PI.toFloat()) / 180f
+                    val bits = ZCodeDetector.sampleBits(
+                        gray,
+                        width,
+                        height,
+                        curCx,
+                        curCy,
+                        curRadius,
+                        angle
+                    )
+
+                    try {
+                        return decodeBits(bits, angle, location.copy(cx = curCx, cy = curCy, radius = curRadius))
+                    } catch (e: Exception) {
+                        lastError = e
+                    }
                 }
             }
         }

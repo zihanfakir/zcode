@@ -187,35 +187,46 @@ export const ScannerPage: React.FC = () => {
 
     let stream: MediaStream | null = null;
     try {
-      // 1. Try ideal rear camera
+      // 1. Try ideal rear camera at 1080p full HD
       stream = await navigator.mediaDevices.getUserMedia({
         video: {
           facingMode: { ideal: facingMode },
-          width: { ideal: 1280 },
-          height: { ideal: 720 },
+          width: { ideal: 1920, min: 1280 },
+          height: { ideal: 1080, min: 720 },
         },
       });
     } catch {
       try {
-        // 2. Fallback without resolution constraint
+        // 2. Fallback to 720p
         stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: { ideal: facingMode } },
+          video: {
+            facingMode: { ideal: facingMode },
+            width: { ideal: 1280 },
+            height: { ideal: 720 },
+          },
         });
       } catch {
         try {
-          // 3. Fallback to any available camera
-          stream = await navigator.mediaDevices.getUserMedia({ video: true });
-        } catch (err: any) {
-          if (!isMountedRef.current) return;
-          if (err.name === "NotAllowedError" || err.name === "PermissionDeniedError") {
-            setCameraError("Camera permission was denied. Please allow camera permissions in your browser or device settings.");
-          } else if (err.name === "NotFoundError" || err.name === "DevicesNotFoundError") {
-            setCameraError("No camera device found on this device.");
-          } else {
-            setCameraError(`Camera error: ${err.message || err.name || "Access failed"}. Please check permissions.`);
+          // 3. Fallback without resolution constraint
+          stream = await navigator.mediaDevices.getUserMedia({
+            video: { facingMode: { ideal: facingMode } },
+          });
+        } catch {
+          try {
+            // 4. Fallback to any available camera
+            stream = await navigator.mediaDevices.getUserMedia({ video: true });
+          } catch (err: any) {
+            if (!isMountedRef.current) return;
+            if (err.name === "NotAllowedError" || err.name === "PermissionDeniedError") {
+              setCameraError("Camera permission was denied. Please allow camera permissions in your browser or device settings.");
+            } else if (err.name === "NotFoundError" || err.name === "DevicesNotFoundError") {
+              setCameraError("No camera device found on this device.");
+            } else {
+              setCameraError(`Camera error: ${err.message || err.name || "Access failed"}. Please check permissions.`);
+            }
+            setCameraActive(false);
+            return;
           }
-          setCameraActive(false);
-          return;
         }
       }
     }
@@ -267,7 +278,7 @@ export const ScannerPage: React.FC = () => {
 
       const video = videoRef.current;
       const canvas = canvasRef.current;
-      const ctx = canvas.getContext("2d");
+      const ctx = canvas.getContext("2d", { willReadFrequently: true });
       if (!ctx) return;
 
       isScanning = true;
@@ -275,18 +286,23 @@ export const ScannerPage: React.FC = () => {
         const minDim = Math.min(video.videoWidth, video.videoHeight);
         const sx = (video.videoWidth - minDim) / 2;
         const sy = (video.videoHeight - minDim) / 2;
+        // Optimal resolution for resolving small data dots on Track 9
+        const targetDim = Math.min(minDim, 1024);
 
-        if (canvas.width !== 512 || canvas.height !== 512) {
-          canvas.width = 512;
-          canvas.height = 512;
+        if (canvas.width !== targetDim || canvas.height !== targetDim) {
+          canvas.width = targetDim;
+          canvas.height = targetDim;
         }
-        ctx.drawImage(video, sx, sy, minDim, minDim, 0, 0, 512, 512);
+
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = "high";
+        ctx.drawImage(video, sx, sy, minDim, minDim, 0, 0, targetDim, targetDim);
 
         processFrame(canvas);
       } finally {
         isScanning = false;
       }
-    }, 250);
+    }, 140);
 
     scanIntervalRef.current = interval;
     return () => clearInterval(interval);
